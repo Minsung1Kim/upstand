@@ -26,8 +26,41 @@ function TeamSettings() {
   const fetchAvailableTeams = async () => {
     try {
       setLoadingAvailable(true);
-      const response = await api.get('/teams/available');
-      setAvailableTeams(response.data.teams || []);
+      
+      // Try multiple endpoints for fetching available teams
+      const endpoints = [
+        '/teams/available',
+        '/available-teams',
+        '/teams/public',
+        '/teams',
+        '/api/teams/available',
+        '/api/teams'
+      ];
+      
+      let response;
+      let success = false;
+      
+      for (const endpoint of endpoints) {
+        try {
+          console.log(`Trying to fetch available teams from: ${endpoint}`);
+          response = await api.get(endpoint);
+          success = true;
+          console.log(`Success fetching from ${endpoint}:`, response.data);
+          break;
+        } catch (endpointError) {
+          console.log(`Failed to fetch from ${endpoint}:`, endpointError.response?.status);
+          continue;
+        }
+      }
+      
+      if (success) {
+        // Handle different response formats
+        const teams = response.data.teams || response.data.available_teams || response.data || [];
+        setAvailableTeams(Array.isArray(teams) ? teams : []);
+      } else {
+        console.log('All endpoints failed for fetching available teams');
+        setAvailableTeams([]);
+      }
     } catch (error) {
       console.error('Failed to fetch available teams:', error);
       setAvailableTeams([]);
@@ -50,12 +83,55 @@ function TeamSettings() {
     try {
       console.log('Creating team:', newTeamName);
       
-      // Try direct API call if createTeam from context fails
-      const response = await api.post('/teams/create', { 
-        name: newTeamName.trim() 
-      });
+      // Try multiple API endpoints that might exist
+      let response;
+      let success = false;
       
-      console.log('Team created successfully:', response.data);
+      // Option 1: Try the context's createTeam method first
+      if (createTeam && typeof createTeam === 'function') {
+        try {
+          console.log('Trying createTeam from context...');
+          response = await createTeam({ name: newTeamName.trim() });
+          success = true;
+          console.log('Context createTeam worked:', response);
+        } catch (contextError) {
+          console.log('Context createTeam failed:', contextError);
+        }
+      }
+      
+      // Option 2: Try different API endpoints
+      if (!success) {
+        const endpoints = [
+          '/teams/create',
+          '/create-team', 
+          '/team/create',
+          '/teams',
+          '/api/teams/create',
+          '/api/teams'
+        ];
+        
+        for (const endpoint of endpoints) {
+          try {
+            console.log(`Trying endpoint: ${endpoint}`);
+            response = await api.post(endpoint, { 
+              name: newTeamName.trim(),
+              team_name: newTeamName.trim() // Some APIs might expect different field names
+            });
+            success = true;
+            console.log(`Success with endpoint ${endpoint}:`, response.data);
+            break;
+          } catch (endpointError) {
+            console.log(`Failed with endpoint ${endpoint}:`, endpointError.response?.status, endpointError.message);
+            continue;
+          }
+        }
+      }
+      
+      if (!success) {
+        throw new Error('All API endpoints failed - please check your backend configuration');
+      }
+      
+      console.log('Team created successfully:', response?.data || response);
       
       // Refresh teams list
       if (refreshTeams) {
@@ -71,17 +147,21 @@ function TeamSettings() {
     } catch (error) {
       console.error('Team creation error:', error);
       
-      // Better error handling
-      if (error.code === 'NETWORK_ERROR' || !error.response) {
-        setError('Network error. Please check your connection and try again.');
+      // More detailed error handling
+      if (error.code === 'NETWORK_ERROR' || error.name === 'AxiosError' || !error.response) {
+        setError(`Network error: ${error.message}. Check if your backend server is running and the API endpoint exists.`);
       } else if (error.response?.status === 400) {
-        setError(error.response.data?.message || 'Invalid team name');
+        setError(error.response.data?.message || error.response.data?.error || 'Invalid team name or request format');
+      } else if (error.response?.status === 404) {
+        setError('API endpoint not found. Please check your backend API configuration.');
       } else if (error.response?.status === 409) {
         setError('A team with this name already exists');
       } else if (error.response?.status === 401) {
         setError('You need to be logged in to create a team');
+      } else if (error.response?.status === 500) {
+        setError('Server error. Please try again later or contact support.');
       } else {
-        setError(error.response?.data?.message || error.message || 'Failed to create team');
+        setError(error.response?.data?.message || error.response?.data?.error || error.message || 'Failed to create team');
       }
     } finally {
       setLoading(false);
@@ -212,7 +292,15 @@ function TeamSettings() {
               {error && (
                 <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
                   <p className="font-medium">Error:</p>
-                  <p>{error}</p>
+                  <p className="text-sm">{error}</p>
+                  <details className="mt-2">
+                    <summary className="text-xs cursor-pointer hover:underline">Debug Information</summary>
+                    <div className="mt-1 text-xs bg-red-100 p-2 rounded font-mono">
+                      <p>Team name: "{newTeamName}"</p>
+                      <p>Check browser console for detailed API logs</p>
+                      <p>Ensure your backend server is running and has team creation endpoints</p>
+                    </div>
+                  </details>
                 </div>
               )}
 
