@@ -32,9 +32,8 @@ function TeamSettings() {
       const allTeams = [
         ...teams, // User's teams
         // Mock additional teams for demo
-        { id: 'demo1', name: 'Design Team', member_count: 5, owner_name: 'Alice Smith' },
-        { id: 'demo2', name: 'Backend Squad', member_count: 3, owner_name: 'Bob Jones' },
-        { id: 'demo3', name: 'QA Team', member_count: 4, owner_name: 'Carol Wilson' }
+        { id: 'demo1', name: 'SAMPLE: Design Team', member_count: 5, owner_name: 'Alice Smith' },
+        { id: 'demo2', name: 'SAMPLE: QA Team', member_count: 3, owner_name: 'Bob Jones' },
       ];
       
       setAvailableTeams(allTeams);
