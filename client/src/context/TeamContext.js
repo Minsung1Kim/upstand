@@ -35,7 +35,17 @@ export function TeamProvider({ children }) {
         setCurrentTeam(response.data.teams[0]);
       }
     } catch (error) {
-      console.error('Error fetching teams:', error);
+      console.error('Error fetching teams from API:', error);
+      
+      // Fallback to localStorage when API fails
+      console.log('Falling back to localStorage for teams');
+      const localTeams = getLocalTeams();
+      setTeams(localTeams);
+      
+      // Set first team as current if none selected
+      if (localTeams.length > 0 && !currentTeam) {
+        setCurrentTeam(localTeams[0]);
+      }
     } finally {
       setLoading(false);
     }
@@ -43,11 +53,66 @@ export function TeamProvider({ children }) {
 
   const createTeam = async (teamData) => {
     try {
+      // Try API first
+      console.log('Attempting to create team via API:', teamData);
       const response = await api.post('/teams', teamData);
-      await fetchTeams();
+      await fetchTeams(); // Refresh from API
       return response.data;
     } catch (error) {
-      throw error;
+      console.error('API team creation failed, using localStorage fallback:', error);
+      
+      // Fallback to localStorage
+      const newTeam = {
+        id: Date.now(),
+        name: teamData.name,
+        role: 'OWNER',
+        member_count: 1,
+        owner_name: currentUser?.email || 'You',
+        created_at: new Date().toISOString()
+      };
+      
+      // Add to localStorage
+      const localTeams = getLocalTeams();
+      localTeams.push(newTeam);
+      saveLocalTeams(localTeams);
+      
+      // Update state immediately
+      setTeams(localTeams);
+      
+      // Set as current team if it's the first one
+      if (localTeams.length === 1) {
+        setCurrentTeam(newTeam);
+      }
+      
+      console.log('Team created locally:', newTeam);
+      return newTeam;
+    }
+  };
+
+  const refreshTeams = async () => {
+    await fetchTeams();
+  };
+
+  // Helper functions for localStorage
+  const getLocalTeams = () => {
+    try {
+      if (!currentUser?.uid) return [];
+      const key = `teams_${currentUser.uid}`;
+      const stored = localStorage.getItem(key);
+      return stored ? JSON.parse(stored) : [];
+    } catch (error) {
+      console.error('Error reading teams from localStorage:', error);
+      return [];
+    }
+  };
+
+  const saveLocalTeams = (teams) => {
+    try {
+      if (!currentUser?.uid) return;
+      const key = `teams_${currentUser.uid}`;
+      localStorage.setItem(key, JSON.stringify(teams));
+    } catch (error) {
+      console.error('Error saving teams to localStorage:', error);
     }
   };
 
@@ -57,7 +122,8 @@ export function TeamProvider({ children }) {
     setCurrentTeam,
     loading,
     fetchTeams,
-    createTeam
+    createTeam,
+    refreshTeams
   };
 
   return (
