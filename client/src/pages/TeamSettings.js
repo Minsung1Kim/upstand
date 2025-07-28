@@ -6,7 +6,7 @@ const handleJoinTeam = async (teamId, teamName) => {
       console.log('Successfully joined team:', response.data);
       
       // Refresh teams list
-      if (refreshTeams) {
+      if (refreshTeams && typeof refreshTeams === 'function') {
         await refreshTeams();
       }
       
@@ -225,7 +225,7 @@ Possible solutions:
   };
 
   const handleLeaveTeam = async (teamId, teamName) => {
-    if (confirm(`Are you sure you want to leave ${teamName}?`)) {
+    if (window.confirm(`Are you sure you want to leave ${teamName}?`)) {
       // Implement leave team logic
       console.log('Leaving team:', teamId);
       // For now, just close the dropdown
@@ -244,7 +244,7 @@ Possible solutions:
   };
 
   const handleDeleteTeam = async (teamId, teamName) => {
-    if (confirm(`Are you sure you want to delete ${teamName}? This action cannot be undone.`)) {
+    if (window.confirm(`Are you sure you want to delete ${teamName}? This action cannot be undone.`)) {
       console.log('Deleting team:', teamId);
       setShowDropdown(null);
     }
