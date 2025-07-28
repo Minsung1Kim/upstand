@@ -1,23 +1,4 @@
-const handleJoinTeam = async (teamId, teamName) => {
-    try {
-      console.log('Joining team:', teamId);
-      const response = await api.post(`/teams/${teamId}/join`);
-      
-      console.log('Successfully joined team:', response.data);
-      
-      // Refresh teams list
-      if (refreshTeams && typeof refreshTeams === 'function') {
-        await refreshTeams();
-      }
-      
-      // Refresh available teams
-      await fetchAvailableTeams();
-      
-    } catch (error) {
-      console.error('Failed to join team:', error);
-      setError(`Failed to join ${teamName}: ${error.response?.data?.message || error.message}`);
-    }
-  };import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useTeam } from '../context/TeamContext';
 import { PlusIcon, UserGroupIcon, ShieldCheckIcon, CodeBracketIcon, CogIcon, EllipsisVerticalIcon } from '@heroicons/react/24/outline';
 import api from '../services/api';
@@ -37,7 +18,7 @@ function TeamSettings() {
   const [error, setError] = useState('');
   const [availableTeams, setAvailableTeams] = useState([]);
   const [loadingAvailable, setLoadingAvailable] = useState(false);
-  const [showDropdown, setShowDropdown] = useState(null); // Track which dropdown is open
+  const [showDropdown, setShowDropdown] = useState(null);
 
   useEffect(() => {
     fetchAvailableTeams();
@@ -48,7 +29,6 @@ function TeamSettings() {
       setLoadingAvailable(true);
       
       // For demo purposes, show all teams including user's own teams
-      // In production, this would filter out teams the user is already in
       const allTeams = [
         ...teams, // User's teams
         // Mock additional teams for demo
@@ -80,7 +60,6 @@ function TeamSettings() {
     try {
       console.log('Creating team:', newTeamName);
       
-      // Try multiple API endpoints that might exist
       let response;
       let success = false;
       
@@ -112,7 +91,7 @@ function TeamSettings() {
             console.log(`Trying endpoint: ${endpoint}`);
             response = await api.post(endpoint, { 
               name: newTeamName.trim(),
-              team_name: newTeamName.trim() // Some APIs might expect different field names
+              team_name: newTeamName.trim()
             });
             success = true;
             console.log(`Success with endpoint ${endpoint}:`, response.data);
@@ -128,9 +107,8 @@ function TeamSettings() {
       if (!success) {
         console.log('All API endpoints failed, using local state fallback');
         
-        // Create a mock team object
         const newTeam = {
-          id: Date.now(), // Simple ID generation
+          id: Date.now(),
           name: newTeamName.trim(),
           role: 'OWNER',
           member_count: 1,
@@ -140,28 +118,20 @@ function TeamSettings() {
         
         console.log('Created mock team:', newTeam);
         
-        // Try to add the team using context methods
         try {
-          // If there's an addTeam method in context, use it
           if (typeof createTeam === 'function') {
-            // This might work if createTeam handles local state
             await createTeam(newTeam);
           }
           
-          // Force a refresh if possible
           if (refreshTeams && typeof refreshTeams === 'function') {
             await refreshTeams();
           }
           
           success = true;
-          
-          // Show a warning that this is offline mode
           setError('⚠️ Working in offline mode - team created locally. Backend connection needed for persistence.');
           
         } catch (localError) {
           console.log('Local team creation also failed:', localError);
-          
-          // Last resort: show success message but explain limitation
           success = true;
           setError('⚠️ Team creation completed but may not persist. Please check your TeamContext implementation and backend connection.');
         }
@@ -170,7 +140,6 @@ function TeamSettings() {
       if (success) {
         console.log('Team created successfully');
         
-        // Refresh teams list if function exists
         if (refreshTeams && typeof refreshTeams === 'function') {
           try {
             await refreshTeams();
@@ -182,12 +151,10 @@ function TeamSettings() {
         setNewTeamName('');
         setShowCreateForm(false);
         
-        // Only clear error if it wasn't a warning message
         if (!error?.includes('offline mode') && !error?.includes('Working in offline mode')) {
           setError('');
         }
         
-        // Try to refresh available teams
         try {
           await fetchAvailableTeams();
         } catch (fetchError) {
@@ -198,7 +165,6 @@ function TeamSettings() {
     } catch (error) {
       console.error('Team creation error:', error);
       
-      // More detailed error handling
       if (error.code === 'NETWORK_ERROR' || error.name === 'AxiosError' || !error.response) {
         setError(`Backend connection failed. The server at localhost:5000 is not responding or blocked by CORS policy. 
 
@@ -224,11 +190,28 @@ Possible solutions:
     }
   };
 
+  const handleJoinTeam = async (teamId, teamName) => {
+    try {
+      console.log('Joining team:', teamId);
+      const response = await api.post(`/teams/${teamId}/join`);
+      
+      console.log('Successfully joined team:', response.data);
+      
+      if (refreshTeams && typeof refreshTeams === 'function') {
+        await refreshTeams();
+      }
+      
+      await fetchAvailableTeams();
+      
+    } catch (error) {
+      console.error('Failed to join team:', error);
+      setError(`Failed to join ${teamName}: ${error.response?.data?.message || error.message}`);
+    }
+  };
+
   const handleLeaveTeam = async (teamId, teamName) => {
     if (window.confirm(`Are you sure you want to leave ${teamName}?`)) {
-      // Implement leave team logic
       console.log('Leaving team:', teamId);
-      // For now, just close the dropdown
       setShowDropdown(null);
     }
   };
@@ -411,7 +394,7 @@ Possible solutions:
                   value={newTeamName}
                   onChange={(e) => {
                     setNewTeamName(e.target.value);
-                    if (error) setError(''); // Clear error when user types
+                    if (error) setError('');
                   }}
                   placeholder="Enter team name (e.g., 'Frontend Team', 'Product Squad')"
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -432,23 +415,6 @@ Possible solutions:
                     {error.includes('offline mode') ? 'Warning:' : 'Error:'}
                   </p>
                   <p className="text-sm whitespace-pre-line">{error}</p>
-                  <details className="mt-2">
-                    <summary className="text-xs cursor-pointer hover:underline">Debug Information</summary>
-                    <div className="mt-1 text-xs bg-gray-100 p-2 rounded font-mono">
-                      <p>Team name: "{newTeamName}"</p>
-                      <p>Backend server: localhost:5000</p>
-                      <p>Error type: ERR_BLOCKED_BY_CLIENT (likely CORS issue)</p>
-                      <p>Teams in state: {teams ? teams.length : 'undefined'}</p>
-                      <p>Current team: {currentTeam?.name || 'none'}</p>
-                      <p>CreateTeam function: {typeof createTeam}</p>
-                      <p>RefreshTeams function: {typeof refreshTeams}</p>
-                      <hr className="my-1" />
-                      <p className="font-semibold">To see created teams:</p>
-                      <p>1. Check your TeamContext implementation</p>
-                      <p>2. Ensure teams state is being updated</p>
-                      <p>3. Verify refreshTeams() works properly</p>
-                    </div>
-                  </details>
                 </div>
               )}
 
