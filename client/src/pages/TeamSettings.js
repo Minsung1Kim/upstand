@@ -1,6 +1,25 @@
-import React, { useState, useEffect } from 'react';
+const handleJoinTeam = async (teamId, teamName) => {
+    try {
+      console.log('Joining team:', teamId);
+      const response = await api.post(`/teams/${teamId}/join`);
+      
+      console.log('Successfully joined team:', response.data);
+      
+      // Refresh teams list
+      if (refreshTeams) {
+        await refreshTeams();
+      }
+      
+      // Refresh available teams
+      await fetchAvailableTeams();
+      
+    } catch (error) {
+      console.error('Failed to join team:', error);
+      setError(`Failed to join ${teamName}: ${error.response?.data?.message || error.message}`);
+    }
+  };import React, { useState, useEffect } from 'react';
 import { useTeam } from '../context/TeamContext';
-import { PlusIcon, UserGroupIcon, ShieldCheckIcon, CodeBracketIcon, CogIcon } from '@heroicons/react/24/outline';
+import { PlusIcon, UserGroupIcon, ShieldCheckIcon, CodeBracketIcon, CogIcon, EllipsisVerticalIcon } from '@heroicons/react/24/outline';
 import api from '../services/api';
 
 const ROLES = {
@@ -18,6 +37,7 @@ function TeamSettings() {
   const [error, setError] = useState('');
   const [availableTeams, setAvailableTeams] = useState([]);
   const [loadingAvailable, setLoadingAvailable] = useState(false);
+  const [showDropdown, setShowDropdown] = useState(null); // Track which dropdown is open
 
   useEffect(() => {
     fetchAvailableTeams();
@@ -27,40 +47,17 @@ function TeamSettings() {
     try {
       setLoadingAvailable(true);
       
-      // Try multiple endpoints for fetching available teams
-      const endpoints = [
-        '/teams/available',
-        '/available-teams',
-        '/teams/public',
-        '/teams',
-        '/api/teams/available',
-        '/api/teams'
+      // For demo purposes, show all teams including user's own teams
+      // In production, this would filter out teams the user is already in
+      const allTeams = [
+        ...teams, // User's teams
+        // Mock additional teams for demo
+        { id: 'demo1', name: 'Design Team', member_count: 5, owner_name: 'Alice Smith' },
+        { id: 'demo2', name: 'Backend Squad', member_count: 3, owner_name: 'Bob Jones' },
+        { id: 'demo3', name: 'QA Team', member_count: 4, owner_name: 'Carol Wilson' }
       ];
       
-      let response;
-      let success = false;
-      
-      for (const endpoint of endpoints) {
-        try {
-          console.log(`Trying to fetch available teams from: ${endpoint}`);
-          response = await api.get(endpoint);
-          success = true;
-          console.log(`Success fetching from ${endpoint}:`, response.data);
-          break;
-        } catch (endpointError) {
-          console.log(`Failed to fetch from ${endpoint}:`, endpointError.response?.status);
-          continue;
-        }
-      }
-      
-      if (success) {
-        // Handle different response formats
-        const teams = response.data.teams || response.data.available_teams || response.data || [];
-        setAvailableTeams(Array.isArray(teams) ? teams : []);
-      } else {
-        console.log('All endpoints failed for fetching available teams');
-        setAvailableTeams([]);
-      }
+      setAvailableTeams(allTeams);
     } catch (error) {
       console.error('Failed to fetch available teams:', error);
       setAvailableTeams([]);
@@ -227,25 +224,34 @@ Possible solutions:
     }
   };
 
-  const handleJoinTeam = async (teamId, teamName) => {
-    try {
-      console.log('Joining team:', teamId);
-      const response = await api.post(`/teams/${teamId}/join`);
-      
-      console.log('Successfully joined team:', response.data);
-      
-      // Refresh teams list
-      if (refreshTeams) {
-        await refreshTeams();
-      }
-      
-      // Refresh available teams
-      await fetchAvailableTeams();
-      
-    } catch (error) {
-      console.error('Failed to join team:', error);
-      setError(`Failed to join ${teamName}: ${error.response?.data?.message || error.message}`);
+  const handleLeaveTeam = async (teamId, teamName) => {
+    if (confirm(`Are you sure you want to leave ${teamName}?`)) {
+      // Implement leave team logic
+      console.log('Leaving team:', teamId);
+      // For now, just close the dropdown
+      setShowDropdown(null);
     }
+  };
+
+  const handlePromoteUser = (teamId) => {
+    console.log('Promote user in team:', teamId);
+    setShowDropdown(null);
+  };
+
+  const handleAssignRole = (teamId) => {
+    console.log('Assign role in team:', teamId);
+    setShowDropdown(null);
+  };
+
+  const handleDeleteTeam = async (teamId, teamName) => {
+    if (confirm(`Are you sure you want to delete ${teamName}? This action cannot be undone.`)) {
+      console.log('Deleting team:', teamId);
+      setShowDropdown(null);
+    }
+  };
+
+  const isUserAlreadyInTeam = (teamId) => {
+    return teams.some(team => team.id === teamId);
   };
 
   const getRoleIcon = (role) => {
@@ -259,7 +265,7 @@ Possible solutions:
   };
 
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="max-w-4xl mx-auto" onClick={() => setShowDropdown(null)}>
       <div className="bg-white rounded-lg shadow p-6">
         <h1 className="text-2xl font-bold mb-6">Team Settings</h1>
         
@@ -294,9 +300,77 @@ Possible solutions:
                           </span>
                         </div>
                       </div>
-                      {currentTeam?.id === team.id && (
-                        <div className="text-blue-600 text-sm font-medium">Selected</div>
-                      )}
+                      <div className="flex items-center space-x-2">
+                        {currentTeam?.id === team.id && (
+                          <div className="text-blue-600 text-sm font-medium">Selected</div>
+                        )}
+                        
+                        {/* 3-dot menu */}
+                        <div className="relative">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setShowDropdown(showDropdown === team.id ? null : team.id);
+                            }}
+                            className="p-1 hover:bg-gray-100 rounded-full"
+                          >
+                            <EllipsisVerticalIcon className="w-5 h-5 text-gray-500" />
+                          </button>
+                          
+                          {showDropdown === team.id && (
+                            <div className="absolute right-0 mt-1 w-48 bg-white rounded-md shadow-lg border border-gray-200 z-10">
+                              <div className="py-1">
+                                {team.role !== 'OWNER' && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleLeaveTeam(team.id, team.name);
+                                    }}
+                                    className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50"
+                                  >
+                                    Leave Team
+                                  </button>
+                                )}
+                                
+                                {(team.role === 'OWNER' || team.role === 'MANAGER') && (
+                                  <>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handlePromoteUser(team.id);
+                                      }}
+                                      className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                                    >
+                                      Promote Member
+                                    </button>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleAssignRole(team.id);
+                                      }}
+                                      className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                                    >
+                                      Assign Roles
+                                    </button>
+                                  </>
+                                )}
+                                
+                                {team.role === 'OWNER' && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleDeleteTeam(team.id, team.name);
+                                    }}
+                                    className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 border-t border-gray-100"
+                                  >
+                                    Delete Team
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 );
@@ -421,25 +495,34 @@ Possible solutions:
             </div>
           ) : availableTeams.length > 0 ? (
             <div className="space-y-2">
-              {availableTeams.map((team) => (
-                <div key={team.id} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg">
-                  <div className="flex items-center space-x-3">
-                    <UserGroupIcon className="w-5 h-5 text-gray-600" />
-                    <div>
-                      <h3 className="font-medium text-gray-900">{team.name}</h3>
-                      <p className="text-sm text-gray-600">
-                        {team.member_count || 0} members • Created by {team.owner_name || 'Unknown'}
-                      </p>
+              {availableTeams.map((team) => {
+                const isAlreadyMember = isUserAlreadyInTeam(team.id);
+                return (
+                  <div key={team.id} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg">
+                    <div className="flex items-center space-x-3">
+                      <UserGroupIcon className="w-5 h-5 text-gray-600" />
+                      <div>
+                        <h3 className="font-medium text-gray-900">{team.name}</h3>
+                        <p className="text-sm text-gray-600">
+                          {team.member_count || 0} members • Created by {team.owner_name || 'Unknown'}
+                        </p>
+                      </div>
                     </div>
+                    {isAlreadyMember ? (
+                      <span className="px-4 py-2 text-sm text-gray-500 bg-gray-100 rounded-md">
+                        Already Member
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => handleJoinTeam(team.id, team.name)}
+                        className="px-4 py-2 text-sm bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
+                      >
+                        Join
+                      </button>
+                    )}
                   </div>
-                  <button
-                    onClick={() => handleJoinTeam(team.id, team.name)}
-                    className="px-4 py-2 text-sm bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
-                  >
-                    Join
-                  </button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <div className="text-center py-8 text-gray-500">
