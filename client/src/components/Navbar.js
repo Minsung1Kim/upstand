@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useTeam } from '../context/TeamContext';
 import { useCompany } from '../context/CompanyContext';
+import { colors } from '../utils/colors';
 
 function Navbar() {
   const { logout, currentUser, getUserProfile } = useAuth();
@@ -42,17 +43,51 @@ function Navbar() {
     'U';
 
   return (
-    <nav style={{backgroundColor: '#343148'}} className="text-white shadow-lg">
+    <nav className="text-white shadow-lg border-b-2" 
+         style={{backgroundColor: colors.secondary[500], borderBottomColor: colors.primary[200]}}>
       <div className="container mx-auto px-4">
         <div className="flex justify-between items-center h-16">
           <div className="flex items-center space-x-8">
-            <Link to="/dashboard" className="text-xl font-bold">Upstand</Link>
-            <div className="flex space-x-4">
-              <Link to="/dashboard" style={{color: '#D7C49E'}} className="hover:opacity-80 transition-opacity">Dashboard</Link>
-              <Link to="/standup" style={{color: '#D7C49E'}} className="hover:opacity-80 transition-opacity">Standup</Link>
-              <Link to="/sprint-planning" style={{color: '#D7C49E'}} className="hover:opacity-80 transition-opacity">Sprints</Link>
-              <Link to="/retrospective" style={{color: '#D7C49E'}} className="hover:opacity-80 transition-opacity">Retro</Link>
-              <Link to="/team-settings" style={{color: '#D7C49E'}} className="hover:opacity-80 transition-opacity">Teams</Link>
+            <Link to="/dashboard" className="text-xl font-bold hover:opacity-90 transition-opacity" 
+                  style={{color: colors.primary[200]}}>
+              Upstand
+            </Link>
+            <div className="flex space-x-6">
+              <Link to="/dashboard" 
+                    className="px-3 py-2 rounded-md hover:bg-opacity-20 transition-all duration-200 font-medium"
+                    style={{color: colors.primary[100]}}
+                    onMouseEnter={(e) => e.target.style.backgroundColor = colors.primary[200] + '20'}
+                    onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}>
+                Dashboard
+              </Link>
+              <Link to="/standup" 
+                    className="px-3 py-2 rounded-md hover:bg-opacity-20 transition-all duration-200 font-medium"
+                    style={{color: colors.primary[100]}}
+                    onMouseEnter={(e) => e.target.style.backgroundColor = colors.primary[200] + '20'}
+                    onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}>
+                Standup
+              </Link>
+              <Link to="/sprint-planning" 
+                    className="px-3 py-2 rounded-md hover:bg-opacity-20 transition-all duration-200 font-medium"
+                    style={{color: colors.sprint.planning}}
+                    onMouseEnter={(e) => e.target.style.backgroundColor = colors.sprint.planning + '20'}
+                    onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}>
+                Sprints
+              </Link>
+              <Link to="/retrospective" 
+                    className="px-3 py-2 rounded-md hover:bg-opacity-20 transition-all duration-200 font-medium"
+                    style={{color: colors.sprint.retrospective}}
+                    onMouseEnter={(e) => e.target.style.backgroundColor = colors.sprint.retrospective + '20'}
+                    onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}>
+                Retro
+              </Link>
+              <Link to="/team-settings" 
+                    className="px-3 py-2 rounded-md hover:bg-opacity-20 transition-all duration-200 font-medium"
+                    style={{color: colors.primary[100]}}
+                    onMouseEnter={(e) => e.target.style.backgroundColor = colors.primary[200] + '20'}
+                    onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}>
+                Teams
+              </Link>
             </div>
           </div>
           
@@ -62,12 +97,24 @@ function Navbar() {
               <div className="relative" ref={dropdownRef}>
                 <button
                   onClick={() => setShowCompanyDropdown(!showCompanyDropdown)}
-                  style={{backgroundColor: '#D7C49E'}}
-                  className="flex items-center space-x-2 hover:opacity-90 rounded-lg px-3 py-2 transition-opacity text-black"
+                  className="flex items-center space-x-2 rounded-lg px-4 py-2 transition-all duration-200 border"
+                  style={{
+                    backgroundColor: colors.primary[200],
+                    color: colors.secondary[500],
+                    borderColor: colors.primary[300]
+                  }}
+                  onMouseEnter={(e) => {
+                    e.target.style.backgroundColor = colors.primary[300];
+                    e.target.style.transform = 'translateY(-1px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.target.style.backgroundColor = colors.primary[200];
+                    e.target.style.transform = 'translateY(0)';
+                  }}
                 >
                   <div className="text-left">
-                    <div className="text-xs opacity-70">Company</div>
-                    <div className="text-sm font-medium">{currentCompany.name}</div>
+                    <div className="text-xs opacity-70 font-medium">Company</div>
+                    <div className="text-sm font-bold">{currentCompany.name}</div>
                   </div>
                   <svg 
                     className={`w-4 h-4 transition-transform ${showCompanyDropdown ? 'rotate-180' : ''}`} 
@@ -81,9 +128,11 @@ function Navbar() {
 
                 {/* Dropdown Menu */}
                 {showCompanyDropdown && (
-                  <div className="absolute top-full right-0 mt-2 w-64 bg-white rounded-lg shadow-lg border z-50">
+                  <div className="absolute top-full right-0 mt-2 w-64 bg-white rounded-lg shadow-xl border-2 z-50"
+                       style={{borderColor: colors.primary[200]}}>
                     <div className="py-2">
-                      <div className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                      <div className="px-4 py-2 text-xs font-semibold uppercase tracking-wide"
+                           style={{color: colors.secondary[400]}}>
                         Switch Company
                       </div>
                       {userCompanies.map((company) => (
@@ -93,10 +142,21 @@ function Navbar() {
                             switchCompany(company);
                             setShowCompanyDropdown(false);
                           }}
-                          className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-100 flex items-center justify-between ${
-                            currentCompany.id === company.id ? 'text-gray-700' : 'text-gray-700'
-                          }`}
-                          style={currentCompany.id === company.id ? {backgroundColor: '#D7C49E', color: '#343148'} : {}}
+                          className="w-full text-left px-4 py-3 text-sm flex items-center justify-between transition-all duration-200"
+                          style={currentCompany.id === company.id ? 
+                            {backgroundColor: colors.primary[200], color: colors.secondary[500]} : 
+                            {color: colors.neutral[700]}
+                          }
+                          onMouseEnter={(e) => {
+                            if (currentCompany.id !== company.id) {
+                              e.target.style.backgroundColor = colors.primary[50];
+                            }
+                          }}
+                          onMouseLeave={(e) => {
+                            if (currentCompany.id !== company.id) {
+                              e.target.style.backgroundColor = 'transparent';
+                            }
+                          }}
                         >
                           <div>
                             <div className="font-medium">{company.name}</div>
@@ -109,12 +169,14 @@ function Navbar() {
                           )}
                         </button>
                       ))}
-                      <div className="border-t border-gray-200 mt-2 pt-2">
+                      <div className="border-t mt-2 pt-2" style={{borderColor: colors.neutral[200]}}>
                         <Link
                           to="/company/join"
                           onClick={() => setShowCompanyDropdown(false)}
-                          style={{color: '#343148'}}
-                          className="w-full text-left px-4 py-2 text-sm hover:opacity-80 flex items-center"
+                          className="w-full text-left px-4 py-2 text-sm flex items-center transition-all duration-200 rounded-md mx-2"
+                          style={{color: colors.secondary[500]}}
+                          onMouseEnter={(e) => e.target.style.backgroundColor = colors.secondary[50]}
+                          onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
                         >
                           <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
@@ -124,8 +186,10 @@ function Navbar() {
                         <Link
                           to="/company/create"
                           onClick={() => setShowCompanyDropdown(false)}
-                          style={{color: '#343148'}}
-                          className="w-full text-left px-4 py-2 text-sm hover:opacity-80 flex items-center"
+                          className="w-full text-left px-4 py-2 text-sm flex items-center transition-all duration-200 rounded-md mx-2"
+                          style={{color: colors.accent.success}}
+                          onMouseEnter={(e) => e.target.style.backgroundColor = colors.accent.success + '10'}
+                          onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
                         >
                           <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
@@ -141,24 +205,30 @@ function Navbar() {
 
             {/* Current Team Display */}
             {currentTeam && (
-              <div className="hidden md:block">
-                <span className="text-sm opacity-70" style={{color: '#D7C49E'}}>Team:</span>
-                <span className="text-sm font-medium ml-1" style={{color: '#D7C49E'}}>{currentTeam.name}</span>
+              <div className="hidden md:block px-3 py-2 rounded-lg border"
+                   style={{backgroundColor: colors.primary[50], borderColor: colors.primary[200]}}>
+                <span className="text-xs font-medium opacity-70" style={{color: colors.secondary[400]}}>Team:</span>
+                <span className="text-sm font-bold ml-1" style={{color: colors.secondary[500]}}>{currentTeam.name}</span>
               </div>
             )}
             
             {/* Welcome Message */}
-            <div className="flex items-center space-x-3">
+            <div className="flex items-center space-x-4">
               <div className="text-right hidden sm:block">
-                <div className="text-sm font-medium" style={{color: '#D7C49E'}}>Welcome, {displayName}</div>
+                <div className="text-sm font-medium" style={{color: colors.primary[100]}}>Welcome, {displayName}</div>
                 {currentUser?.email && (
-                  <div className="text-xs opacity-70" style={{color: '#D7C49E'}}>{currentUser.email}</div>
+                  <div className="text-xs opacity-70" style={{color: colors.primary[200]}}>{currentUser.email}</div>
                 )}
               </div>
               
               {/* User Avatar */}
-              <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{backgroundColor: '#D7C49E'}}>
-                <span className="text-sm font-semibold" style={{color: '#343148'}}>
+              <div className="w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all duration-200"
+                   style={{
+                     backgroundColor: colors.primary[200], 
+                     borderColor: colors.primary[300],
+                     color: colors.secondary[500]
+                   }}>
+                <span className="text-sm font-bold">
                   {initials}
                 </span>
               </div>
@@ -166,8 +236,22 @@ function Navbar() {
               {/* Logout Button */}
               <button 
                 onClick={handleLogout} 
-                className="hover:opacity-80 transition-opacity text-sm font-medium px-3 py-1 rounded"
-                style={{color: '#D7C49E', backgroundColor: 'rgba(215, 196, 158, 0.2)'}}
+                className="text-sm font-medium px-4 py-2 rounded-lg transition-all duration-200 border"
+                style={{
+                  color: colors.primary[200], 
+                  borderColor: colors.primary[200] + '40',
+                  backgroundColor: 'rgba(215, 196, 158, 0.1)'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = colors.primary[200];
+                  e.target.style.color = colors.secondary[500];
+                  e.target.style.transform = 'translateY(-1px)';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = 'rgba(215, 196, 158, 0.1)';
+                  e.target.style.color = colors.primary[200];
+                  e.target.style.transform = 'translateY(0)';
+                }}
               >
                 Logout
               </button>
