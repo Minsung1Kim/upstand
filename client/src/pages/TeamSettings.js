@@ -38,10 +38,10 @@ function TeamSettings() {
       // For demo purposes, show all teams including user's own teams
       const allTeams = [
         ...(teams || []), // User's teams with fallback
-        // Mock additional teams for demo
-        { id: 'demo1', name: 'Design Team', member_count: 5, owner_name: 'Alice Smith' },
-        { id: 'demo2', name: 'Backend Squad', member_count: 3, owner_name: 'Bob Jones' },
-        { id: 'demo3', name: 'QA Team', member_count: 4, owner_name: 'Carol Wilson' }
+        // Mock additional teams for demo - now with "Sample" prefix
+        { id: 'demo1', name: 'Sample Design Team', member_count: 5, owner_name: 'Alice Smith' },
+        { id: 'demo2', name: 'Sample Backend Squad', member_count: 3, owner_name: 'Bob Jones' },
+        { id: 'demo3', name: 'Sample QA Team', member_count: 4, owner_name: 'Carol Wilson' }
       ];
       
       setAvailableTeams(allTeams);
@@ -284,60 +284,38 @@ function TeamSettings() {
                               e.stopPropagation();
                               setShowDropdown(showDropdown === team.id ? null : team.id);
                             }}
-                            className="p-1 hover:bg-gray-100 rounded-full"
+                            className="p-1 hover:bg-gray-200 rounded"
                           >
                             <EllipsisVerticalIcon className="w-5 h-5 text-gray-500" />
                           </button>
                           
                           {showDropdown === team.id && (
-                            <div className="absolute right-0 mt-1 w-48 bg-white rounded-md shadow-lg border border-gray-200 z-10">
+                            <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg z-10 border">
                               <div className="py-1">
-                                {team.role !== 'OWNER' && (
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleLeaveTeam(team.id, team.name);
-                                    }}
-                                    className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50"
-                                  >
-                                    Leave Team
-                                  </button>
-                                )}
-                                
-                                {(team.role === 'OWNER' || team.role === 'MANAGER') && (
-                                  <>
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handlePromoteUser(team.id);
-                                      }}
-                                      className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                                    >
-                                      Promote Member
-                                    </button>
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleAssignRole(team.id);
-                                      }}
-                                      className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                                    >
-                                      Assign Roles
-                                    </button>
-                                  </>
-                                )}
-                                
-                                {team.role === 'OWNER' && (
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleDeleteTeam(team.id, team.name);
-                                    }}
-                                    className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 border-t border-gray-100"
-                                  >
-                                    Delete Team
-                                  </button>
-                                )}
+                                <button
+                                  onClick={() => handleLeaveTeam(team.id, team.name)}
+                                  className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 w-full text-left"
+                                >
+                                  Leave Team
+                                </button>
+                                <button
+                                  onClick={() => handlePromoteUser(team.id)}
+                                  className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 w-full text-left"
+                                >
+                                  Promote Member
+                                </button>
+                                <button
+                                  onClick={() => handleAssignRole(team.id)}
+                                  className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 w-full text-left"
+                                >
+                                  Assign Roles
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteTeam(team.id, team.name)}
+                                  className="block px-4 py-2 text-sm text-red-600 hover:bg-red-50 w-full text-left"
+                                >
+                                  Delete Team
+                                </button>
                               </div>
                             </div>
                           )}
@@ -350,66 +328,64 @@ function TeamSettings() {
             </div>
           ) : (
             <div className="text-center py-8 text-gray-500">
-              <UserGroupIcon className="w-12 h-12 mx-auto mb-3 text-gray-400" />
-              <p>No teams found. Create your first team below!</p>
+              <UserGroupIcon className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+              <p className="mb-4">You haven't joined any teams yet.</p>
+              <button
+                onClick={() => setShowCreateForm(true)}
+                className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors"
+              >
+                Create Your First Team
+              </button>
             </div>
           )}
         </div>
 
-        {/* Create New Team Section */}
-        <div className="border-t pt-6">
+        {/* Create Team Section */}
+        <div className="mb-8">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold">Create New Team</h2>
-            {!showCreateForm && (
-              <button
-                onClick={() => setShowCreateForm(true)}
-                className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-              >
-                <PlusIcon className="w-4 h-4" />
-                <span>Create Team</span>
-              </button>
-            )}
           </div>
-
-          {showCreateForm && (
+          
+          {!showCreateForm ? (
+            <button
+              onClick={() => setShowCreateForm(true)}
+              className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
+            >
+              <PlusIcon className="w-5 h-5" />
+              <span>Create Team</span>
+            </button>
+          ) : (
             <form onSubmit={handleCreateTeam} className="space-y-4">
+              {error && (
+                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+                  {error}
+                </div>
+              )}
+              
               <div>
                 <label htmlFor="teamName" className="block text-sm font-medium text-gray-700 mb-2">
                   Team Name
                 </label>
                 <input
-                  id="teamName"
                   type="text"
+                  id="teamName"
                   value={newTeamName}
-                  onChange={(e) => {
-                    setNewTeamName(e.target.value);
-                    if (error) setError('');
-                  }}
-                  placeholder="Enter team name (e.g., 'Frontend Team', 'Product Squad')"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  required
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  You'll be the Owner of this team with full management privileges
-                </p>
-              </div>
-
-              {error && (
-                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
-                  <p className="font-medium">Error:</p>
-                  <p className="text-sm">{error}</p>
-                </div>
-              )}
-
-              <div className="flex space-x-3">
-                <button 
-                  type="submit" 
+                  onChange={(e) => setNewTeamName(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Enter team name..."
                   disabled={loading}
-                  className="flex-1 py-2 px-4 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+                />
+              </div>
+              
+              <div className="flex space-x-3">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   {loading ? 'Creating...' : 'Create Team'}
                 </button>
-                <button 
+                <button
                   type="button"
                   onClick={() => {
                     setShowCreateForm(false);
@@ -425,50 +401,42 @@ function TeamSettings() {
           )}
         </div>
 
-        {/* Available Teams to Join Section */}
-        <div className="border-t pt-6 mt-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold">Available Teams</h2>
-            <button
-              onClick={fetchAvailableTeams}
-              className="text-sm text-blue-600 hover:text-blue-700"
-              disabled={loadingAvailable}
-            >
-              {loadingAvailable ? 'Refreshing...' : 'Refresh'}
-            </button>
-          </div>
-          
+        {/* Available Teams to Join */}
+        <div className="mb-8">
+          <h2 className="text-lg font-semibold mb-4">Available Teams to Join</h2>
           {loadingAvailable ? (
             <div className="text-center py-4">
               <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto"></div>
+              <p className="text-gray-500 mt-2">Loading available teams...</p>
             </div>
           ) : availableTeams.length > 0 ? (
-            <div className="space-y-2">
-              {availableTeams.map((team) => {
-                const isAlreadyMember = isUserAlreadyInTeam(team.id);
+            <div className="space-y-3">
+              {availableTeams.map(team => {
                 return (
-                  <div key={team.id} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg">
+                  <div key={team.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50">
                     <div className="flex items-center space-x-3">
                       <UserGroupIcon className="w-5 h-5 text-gray-600" />
                       <div>
                         <h3 className="font-medium text-gray-900">{team.name}</h3>
                         <p className="text-sm text-gray-600">
-                          {team.member_count || 0} members • Created by {team.owner_name || 'Unknown'}
+                          {team.member_count} members • Owner: {team.owner_name}
                         </p>
                       </div>
                     </div>
-                    {isAlreadyMember ? (
-                      <span className="px-4 py-2 text-sm text-gray-500 bg-gray-100 rounded-md">
-                        Already Member
-                      </span>
-                    ) : (
-                      <button
-                        onClick={() => handleJoinTeam(team.id, team.name)}
-                        className="px-4 py-2 text-sm bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
-                      >
-                        Join
-                      </button>
-                    )}
+                    <div className="flex items-center space-x-2">
+                      {isUserAlreadyInTeam(team.id) ? (
+                        <span className="px-4 py-2 text-sm text-gray-500 bg-gray-100 rounded-md">
+                          Already Member
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => handleJoinTeam(team.id, team.name)}
+                          className="px-4 py-2 text-sm bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
+                        >
+                          Join
+                        </button>
+                      )}
+                    </div>
                   </div>
                 );
               })}
