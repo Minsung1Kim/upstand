@@ -33,7 +33,7 @@ function JoinCompany() {
     <div className="min-h-screen bg-gray-50 flex items-center justify-center">
       <div className="max-w-md w-full bg-white rounded-lg shadow-md p-6">
         <div className="text-center mb-6">
-          <h1 className="text-2xl font-bold text-gray-900">Join a Company</h1>
+          <h1 className="text-2xl font-bold" style={{color: '#343148'}}>Join a Company</h1>
           <p className="text-gray-600 mt-2">Enter the company code provided by your administrator</p>
         </div>
 
@@ -64,7 +64,8 @@ function JoinCompany() {
             <button
               type="submit"
               disabled={loading || !companyCode.trim()}
-              className="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="w-full text-white py-2 px-4 rounded-lg hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
+              style={{backgroundColor: '#343148'}}
             >
               {loading ? (
                 <div className="flex items-center justify-center">
@@ -85,7 +86,8 @@ function JoinCompany() {
               </Link>
               <Link
                 to="/company/create"
-                className="flex-1 text-center bg-green-600 text-white py-2 px-4 rounded-lg hover:bg-green-700 transition-colors"
+                className="flex-1 text-center text-white py-2 px-4 rounded-lg hover:opacity-90 transition-opacity"
+                style={{backgroundColor: '#D7C49E', color: '#343148'}}
               >
                 Create Instead
               </Link>
@@ -96,7 +98,7 @@ function JoinCompany() {
         <div className="mt-6 pt-4 border-t text-center">
           <p className="text-sm text-gray-500">
             Don't have a company code?{' '}
-            <Link to="/company/create" className="text-blue-600 hover:underline">
+            <Link to="/company/create" className="hover:underline" style={{color: '#343148'}}>
               Create a new company
             </Link>
           </p>

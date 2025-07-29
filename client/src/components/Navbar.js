@@ -42,17 +42,17 @@ function Navbar() {
     'U';
 
   return (
-    <nav className="bg-blue-600 text-white shadow-lg">
+    <nav style={{backgroundColor: '#343148'}} className="text-white shadow-lg">
       <div className="container mx-auto px-4">
         <div className="flex justify-between items-center h-16">
           <div className="flex items-center space-x-8">
             <Link to="/dashboard" className="text-xl font-bold">Upstand</Link>
             <div className="flex space-x-4">
-              <Link to="/dashboard" className="hover:text-blue-200 transition-colors">Dashboard</Link>
-              <Link to="/standup" className="hover:text-blue-200 transition-colors">Standup</Link>
-              <Link to="/sprint-planning" className="hover:text-blue-200 transition-colors">Sprints</Link>
-              <Link to="/retrospective" className="hover:text-blue-200 transition-colors">Retro</Link>
-              <Link to="/team-settings" className="hover:text-blue-200 transition-colors">Teams</Link>
+              <Link to="/dashboard" style={{color: '#D7C49E'}} className="hover:opacity-80 transition-opacity">Dashboard</Link>
+              <Link to="/standup" style={{color: '#D7C49E'}} className="hover:opacity-80 transition-opacity">Standup</Link>
+              <Link to="/sprint-planning" style={{color: '#D7C49E'}} className="hover:opacity-80 transition-opacity">Sprints</Link>
+              <Link to="/retrospective" style={{color: '#D7C49E'}} className="hover:opacity-80 transition-opacity">Retro</Link>
+              <Link to="/team-settings" style={{color: '#D7C49E'}} className="hover:opacity-80 transition-opacity">Teams</Link>
             </div>
           </div>
           
@@ -62,10 +62,11 @@ function Navbar() {
               <div className="relative" ref={dropdownRef}>
                 <button
                   onClick={() => setShowCompanyDropdown(!showCompanyDropdown)}
-                  className="flex items-center space-x-2 bg-blue-700 hover:bg-blue-800 rounded-lg px-3 py-2 transition-colors"
+                  style={{backgroundColor: '#D7C49E'}}
+                  className="flex items-center space-x-2 hover:opacity-90 rounded-lg px-3 py-2 transition-opacity text-black"
                 >
                   <div className="text-left">
-                    <div className="text-xs text-blue-200">Company</div>
+                    <div className="text-xs opacity-70">Company</div>
                     <div className="text-sm font-medium">{currentCompany.name}</div>
                   </div>
                   <svg 
@@ -93,8 +94,9 @@ function Navbar() {
                             setShowCompanyDropdown(false);
                           }}
                           className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-100 flex items-center justify-between ${
-                            currentCompany.id === company.id ? 'bg-blue-50 text-blue-600' : 'text-gray-700'
+                            currentCompany.id === company.id ? 'text-gray-700' : 'text-gray-700'
                           }`}
+                          style={currentCompany.id === company.id ? {backgroundColor: '#D7C49E', color: '#343148'} : {}}
                         >
                           <div>
                             <div className="font-medium">{company.name}</div>
@@ -111,7 +113,8 @@ function Navbar() {
                         <Link
                           to="/company/join"
                           onClick={() => setShowCompanyDropdown(false)}
-                          className="w-full text-left px-4 py-2 text-sm text-blue-600 hover:bg-blue-50 flex items-center"
+                          style={{color: '#343148'}}
+                          className="w-full text-left px-4 py-2 text-sm hover:opacity-80 flex items-center"
                         >
                           <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
@@ -121,7 +124,8 @@ function Navbar() {
                         <Link
                           to="/company/create"
                           onClick={() => setShowCompanyDropdown(false)}
-                          className="w-full text-left px-4 py-2 text-sm text-green-600 hover:bg-green-50 flex items-center"
+                          style={{color: '#343148'}}
+                          className="w-full text-left px-4 py-2 text-sm hover:opacity-80 flex items-center"
                         >
                           <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
@@ -138,23 +142,23 @@ function Navbar() {
             {/* Current Team Display */}
             {currentTeam && (
               <div className="hidden md:block">
-                <span className="text-sm text-blue-200">Team:</span>
-                <span className="text-sm font-medium ml-1">{currentTeam.name}</span>
+                <span className="text-sm opacity-70" style={{color: '#D7C49E'}}>Team:</span>
+                <span className="text-sm font-medium ml-1" style={{color: '#D7C49E'}}>{currentTeam.name}</span>
               </div>
             )}
             
             {/* Welcome Message */}
             <div className="flex items-center space-x-3">
               <div className="text-right hidden sm:block">
-                <div className="text-sm font-medium">Welcome, {displayName}</div>
+                <div className="text-sm font-medium" style={{color: '#D7C49E'}}>Welcome, {displayName}</div>
                 {currentUser?.email && (
-                  <div className="text-xs text-blue-200">{currentUser.email}</div>
+                  <div className="text-xs opacity-70" style={{color: '#D7C49E'}}>{currentUser.email}</div>
                 )}
               </div>
               
               {/* User Avatar */}
-              <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center">
-                <span className="text-sm font-semibold">
+              <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{backgroundColor: '#D7C49E'}}>
+                <span className="text-sm font-semibold" style={{color: '#343148'}}>
                   {initials}
                 </span>
               </div>
@@ -162,7 +166,8 @@ function Navbar() {
               {/* Logout Button */}
               <button 
                 onClick={handleLogout} 
-                className="hover:text-blue-200 transition-colors text-sm font-medium px-3 py-1 rounded hover:bg-blue-700"
+                className="hover:opacity-80 transition-opacity text-sm font-medium px-3 py-1 rounded"
+                style={{color: '#D7C49E', backgroundColor: 'rgba(215, 196, 158, 0.2)'}}
               >
                 Logout
               </button>
