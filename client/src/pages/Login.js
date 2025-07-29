@@ -62,6 +62,15 @@ function Login() {
           </p>
         </div>
 
+        {/* Guidance for New Users */}
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <h3 className="text-sm font-semibold text-blue-900 mb-2">New to Upstand?</h3>
+          <div className="text-sm text-blue-800 space-y-1">
+            <p><strong>Scrum Master/Team Lead?</strong> <Link to="/register" className="underline font-medium">Sign up</Link> as Manager to create your team's workspace and get a code.</p>
+            <p><strong>Team Member?</strong> Ask your Scrum Master to sign up first, then use their code to <Link to="/register" className="underline font-medium">join here</Link>.</p>
+          </div>
+        </div>
+
         {/* Google Sign-In Button */}
         <div>
           <button

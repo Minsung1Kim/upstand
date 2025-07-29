@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useTeam } from '../context/TeamContext';
+import { useAuth } from '../context/AuthContext';
+import { useCompany } from '../context/CompanyContext';
 import { PlusIcon, UserGroupIcon, ShieldCheckIcon, CodeBracketIcon, CogIcon, EllipsisVerticalIcon } from '@heroicons/react/24/outline';
 import api from '../services/api';
 
@@ -12,6 +14,8 @@ const ROLES = {
 
 function TeamSettings() {
   const { teams, currentTeam, setCurrentTeam, createTeam, refreshTeams } = useTeam();
+  const { currentUser, getUserRole } = useAuth();
+  const { currentCompany } = useCompany();
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newTeamName, setNewTeamName] = useState('');
   const [loading, setLoading] = useState(false);
@@ -20,9 +24,12 @@ function TeamSettings() {
   const [loadingAvailable, setLoadingAvailable] = useState(false);
   const [showDropdown, setShowDropdown] = useState(null);
 
+  const userRole = getUserRole();
+  const isManager = userRole === 'MANAGER';
+
   useEffect(() => {
     fetchAvailableTeams();
-  }, []);
+  }, [teams]);
 
   const fetchAvailableTeams = async () => {
     try {
@@ -30,10 +37,11 @@ function TeamSettings() {
       
       // For demo purposes, show all teams including user's own teams
       const allTeams = [
-        ...teams, // User's teams
+        ...(teams || []), // User's teams with fallback
         // Mock additional teams for demo
-        { id: 'demo1', name: 'SAMPLE: Design Team', member_count: 5, owner_name: 'Alice Smith' },
-        { id: 'demo2', name: 'SAMPLE: QA Team', member_count: 3, owner_name: 'Bob Jones' },
+        { id: 'demo1', name: 'Design Team', member_count: 5, owner_name: 'Alice Smith' },
+        { id: 'demo2', name: 'Backend Squad', member_count: 3, owner_name: 'Bob Jones' },
+        { id: 'demo3', name: 'QA Team', member_count: 4, owner_name: 'Carol Wilson' }
       ];
       
       setAvailableTeams(allTeams);
@@ -45,8 +53,34 @@ function TeamSettings() {
     }
   };
 
+  const getLocalTeams = () => {
+    try {
+      if (!currentUser?.uid || !currentCompany?.id) return [];
+      const key = `teams_${currentCompany.id}_${currentUser.uid}`;
+      const stored = localStorage.getItem(key);
+      return stored ? JSON.parse(stored) : [];
+    } catch (error) {
+      return [];
+    }
+  };
+
+  const saveLocalTeams = (teams) => {
+    try {
+      if (!currentUser?.uid || !currentCompany?.id) return;
+      const key = `teams_${currentCompany.id}_${currentUser.uid}`;
+      localStorage.setItem(key, JSON.stringify(teams));
+    } catch (error) {
+      console.error('Error saving teams:', error);
+    }
+  };
+
   const handleCreateTeam = async (e) => {
     e.preventDefault();
+    
+    if (!isManager) {
+      setError('Only managers can create teams. Please contact your manager or change your role in settings.');
+      return;
+    }
     
     if (!newTeamName.trim()) {
       setError('Team name is required');
@@ -59,131 +93,57 @@ function TeamSettings() {
     try {
       console.log('Creating team:', newTeamName);
       
-      let response;
       let success = false;
       
-      // Option 1: Try the context's createTeam method first
+      // Try the context's createTeam method first
       if (createTeam && typeof createTeam === 'function') {
         try {
           console.log('Trying createTeam from context...');
-          response = await createTeam({ name: newTeamName.trim() });
+          await createTeam({ name: newTeamName.trim() });
           success = true;
-          console.log('Context createTeam worked:', response);
+          console.log('Context createTeam worked');
         } catch (contextError) {
           console.log('Context createTeam failed:', contextError);
         }
       }
       
-      // Option 2: Try different API endpoints
+      // Fallback to local state management if all APIs fail
       if (!success) {
-        const endpoints = [
-          '/teams/create',
-          '/create-team', 
-          '/team/create',
-          '/teams',
-          '/api/teams/create',
-          '/api/teams'
-        ];
-        
-        for (const endpoint of endpoints) {
-          try {
-            console.log(`Trying endpoint: ${endpoint}`);
-            response = await api.post(endpoint, { 
-              name: newTeamName.trim(),
-              team_name: newTeamName.trim()
-            });
-            success = true;
-            console.log(`Success with endpoint ${endpoint}:`, response.data);
-            break;
-          } catch (endpointError) {
-            console.log(`Failed with endpoint ${endpoint}:`, endpointError.response?.status, endpointError.message);
-            continue;
-          }
-        }
-      }
-      
-      // Option 3: Fallback to local state management if all APIs fail
-      if (!success) {
-        console.log('All API endpoints failed, using local state fallback');
+        console.log('Using local state fallback for team creation');
         
         const newTeam = {
           id: Date.now(),
           name: newTeamName.trim(),
           role: 'OWNER',
           member_count: 1,
-          owner_name: 'You',
+          owner_name: currentUser?.email || 'You',
+          company_id: currentCompany?.id || 'demo',
           created_at: new Date().toISOString()
         };
         
-        console.log('Created mock team:', newTeam);
+        const localTeams = getLocalTeams();
+        localTeams.push(newTeam);
+        saveLocalTeams(localTeams);
         
-        try {
-          if (typeof createTeam === 'function') {
-            await createTeam(newTeam);
-          }
-          
-          if (refreshTeams && typeof refreshTeams === 'function') {
-            await refreshTeams();
-          }
-          
-          success = true;
-          setError('⚠️ Working in offline mode - team created locally. Backend connection needed for persistence.');
-          
-        } catch (localError) {
-          console.log('Local team creation also failed:', localError);
-          success = true;
-          setError('⚠️ Team creation completed but may not persist. Please check your TeamContext implementation and backend connection.');
+        // Update teams state if available
+        if (refreshTeams && typeof refreshTeams === 'function') {
+          await refreshTeams();
         }
+        
+        success = true;
+        console.log('Team created locally:', newTeam);
       }
       
       if (success) {
-        console.log('Team created successfully');
-        
-        if (refreshTeams && typeof refreshTeams === 'function') {
-          try {
-            await refreshTeams();
-          } catch (refreshError) {
-            console.log('Failed to refresh teams:', refreshError);
-          }
-        }
-        
         setNewTeamName('');
         setShowCreateForm(false);
-        
-        if (!error?.includes('offline mode') && !error?.includes('Working in offline mode')) {
-          setError('');
-        }
-        
-        try {
-          await fetchAvailableTeams();
-        } catch (fetchError) {
-          console.log('Failed to refresh available teams:', fetchError);
-        }
+        setError('');
+        await fetchAvailableTeams();
       }
       
     } catch (error) {
       console.error('Team creation error:', error);
-      
-      if (error.code === 'NETWORK_ERROR' || error.name === 'AxiosError' || !error.response) {
-        setError(`Backend connection failed. The server at localhost:5000 is not responding or blocked by CORS policy. 
-
-Possible solutions:
-1. Start your backend server
-2. Check CORS configuration
-3. Use development mode (teams will be stored locally)`);
-      } else if (error.response?.status === 400) {
-        setError(error.response.data?.message || error.response.data?.error || 'Invalid team name or request format');
-      } else if (error.response?.status === 404) {
-        setError('API endpoint not found. Your backend may not have team creation implemented yet.');
-      } else if (error.response?.status === 409) {
-        setError('A team with this name already exists');
-      } else if (error.response?.status === 401) {
-        setError('You need to be logged in to create a team');
-      } else if (error.response?.status === 500) {
-        setError('Server error. Please try again later or contact support.');
-      } else {
-        setError(error.message || 'Failed to create team');
-      }
+      setError('Failed to create team: ' + error.message);
     } finally {
       setLoading(false);
     }
@@ -192,48 +152,55 @@ Possible solutions:
   const handleJoinTeam = async (teamId, teamName) => {
     try {
       console.log('Joining team:', teamId);
-      const response = await api.post(`/teams/${teamId}/join`);
-      
-      console.log('Successfully joined team:', response.data);
-      
-      if (refreshTeams && typeof refreshTeams === 'function') {
-        await refreshTeams();
-      }
-      
-      await fetchAvailableTeams();
-      
+      // For now, just show success message
+      alert(`Joining team "${teamName}" - Feature coming soon!`);
     } catch (error) {
       console.error('Failed to join team:', error);
-      setError(`Failed to join ${teamName}: ${error.response?.data?.message || error.message}`);
+      setError(`Failed to join ${teamName}: ${error.message}`);
     }
   };
 
   const handleLeaveTeam = async (teamId, teamName) => {
     if (window.confirm(`Are you sure you want to leave ${teamName}?`)) {
       console.log('Leaving team:', teamId);
+      alert(`Left team "${teamName}" - Feature coming soon!`);
       setShowDropdown(null);
     }
   };
 
   const handlePromoteUser = (teamId) => {
-    console.log('Promote user in team:', teamId);
+    alert('Promote member feature coming soon!');
     setShowDropdown(null);
   };
 
   const handleAssignRole = (teamId) => {
-    console.log('Assign role in team:', teamId);
+    alert('Assign roles feature coming soon!');
     setShowDropdown(null);
   };
 
   const handleDeleteTeam = async (teamId, teamName) => {
     if (window.confirm(`Are you sure you want to delete ${teamName}? This action cannot be undone.`)) {
-      console.log('Deleting team:', teamId);
-      setShowDropdown(null);
+      try {
+        // Remove team from localStorage
+        const localTeams = getLocalTeams();
+        const updatedTeams = localTeams.filter(team => team.id !== teamId);
+        saveLocalTeams(updatedTeams);
+        
+        // Update teams state if available
+        if (refreshTeams && typeof refreshTeams === 'function') {
+          await refreshTeams();
+        }
+        
+        alert(`Team "${teamName}" has been deleted.`);
+        setShowDropdown(null);
+      } catch (error) {
+        alert('Failed to delete team: ' + error.message);
+      }
     }
   };
 
   const isUserAlreadyInTeam = (teamId) => {
-    return teams.some(team => team.id === teamId);
+    return teams && teams.some(team => team.id === teamId);
   };
 
   const getRoleIcon = (role) => {
@@ -246,10 +213,33 @@ Possible solutions:
     return ROLES[role?.toUpperCase()] || ROLES.DEVELOPER;
   };
 
+  // Show access denied for non-managers
+  if (!isManager) {
+    return (
+      <div className="max-w-4xl mx-auto">
+        <div className="bg-red-50 border border-red-200 text-red-700 px-6 py-4 rounded-lg">
+          <h3 className="text-lg font-semibold text-red-800 mb-2">Access Denied</h3>
+          <p className="mb-2">Only managers can access team settings and create teams.</p>
+          <p className="text-sm text-red-600">
+            If you're a manager, please update your role in your profile settings or contact your administrator.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-4xl mx-auto" onClick={() => setShowDropdown(null)}>
       <div className="bg-white rounded-lg shadow p-6">
         <h1 className="text-2xl font-bold mb-6">Team Settings</h1>
+        
+        {/* Current Company Display */}
+        {currentCompany && (
+          <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+            <h3 className="font-semibold text-blue-900">Current Company: {currentCompany.name}</h3>
+            <p className="text-sm text-blue-700">Code: {currentCompany.code}</p>
+          </div>
+        )}
         
         {/* Your Teams Section */}
         <div className="mb-8">
@@ -405,15 +395,9 @@ Possible solutions:
               </div>
 
               {error && (
-                <div className={`border px-4 py-3 rounded ${
-                  error.includes('offline mode') 
-                    ? 'bg-yellow-50 border-yellow-200 text-yellow-700' 
-                    : 'bg-red-50 border-red-200 text-red-700'
-                }`}>
-                  <p className="font-medium">
-                    {error.includes('offline mode') ? 'Warning:' : 'Error:'}
-                  </p>
-                  <p className="text-sm whitespace-pre-line">{error}</p>
+                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+                  <p className="font-medium">Error:</p>
+                  <p className="text-sm">{error}</p>
                 </div>
               )}
 

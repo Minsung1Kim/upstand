@@ -61,6 +61,16 @@ function Register() {
             Create your account
           </h2>
         </div>
+
+        {/* Guidance Box */}
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <h3 className="text-sm font-semibold text-blue-900 mb-2">New to Upstand?</h3>
+          <div className="text-sm text-blue-800 space-y-1">
+            <p><strong>Scrum Master/Team Lead?</strong> Select "Manager/PM" below to create your team's workspace.</p>
+            <p><strong>Team Member?</strong> Get your company code from your Scrum Master and select "Team Member".</p>
+          </div>
+        </div>
+
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           <div className="space-y-4">
             <input
@@ -96,25 +106,40 @@ function Register() {
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="MEMBER">Team Member</option>
-                <option value="MANAGER">Manager/PM</option>
+                <option value="MANAGER">Manager/PM/Scrum Master</option>
               </select>
               <p className="text-xs text-gray-500">
                 {role === 'MANAGER' 
-                  ? 'Managers can create companies and have admin access' 
-                  : 'Team members need a company code from their manager'
+                  ? 'You can create companies and get codes for your team' 
+                  : 'You need a company code from your Scrum Master/Manager'
                 }
               </p>
             </div>
 
             {role === 'MEMBER' && (
-              <input
-                type="text"
-                required
-                value={companyCode}
-                onChange={(e) => setCompanyCode(e.target.value.toUpperCase())}
-                className="appearance-none relative block w-full px-3 py-2 border border-gray-300 rounded-md"
-                placeholder="Company Code (get from your manager)"
-              />
+              <div className="space-y-2">
+                <input
+                  type="text"
+                  required
+                  value={companyCode}
+                  onChange={(e) => setCompanyCode(e.target.value.toUpperCase())}
+                  className="appearance-none relative block w-full px-3 py-2 border border-gray-300 rounded-md"
+                  placeholder="Company Code (e.g., ACME123)"
+                />
+                <div className="bg-yellow-50 border border-yellow-200 rounded p-2">
+                  <p className="text-xs text-yellow-800">
+                    <strong>Don't have a code?</strong> Ask your Scrum Master to sign up as "Manager/PM" and create your team's workspace first.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {role === 'MANAGER' && (
+              <div className="bg-green-50 border border-green-200 rounded p-2">
+                <p className="text-xs text-green-800">
+                  <strong>After signup:</strong> You'll be able to create your team's workspace and get a code to share with your team members.
+                </p>
+              </div>
             )}
           </div>
 
