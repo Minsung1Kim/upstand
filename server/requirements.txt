@@ -1,8 +1,8 @@
-Flask==2.3.2
-flask-cors==4.0.0
-firebase-admin==6.1.0
-openai==0.27.8
+Flask==2.3.3
+Flask-CORS==4.0.0
+firebase-admin==6.2.0
 python-dotenv==1.0.0
-gunicorn==20.1.0
+openai==0.28.1
+google-cloud-firestore==2.11.1
+PyJWT==2.8.0
 requests==2.31.0
-python-dateutil==2.8.2
