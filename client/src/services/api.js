@@ -14,13 +14,20 @@ const api = axios.create({
   },
 });
 
-// Request interceptor to add auth token
+// Request interceptor to add auth token and company context
 api.interceptors.request.use(
   async (config) => {
     const user = auth.currentUser;
     if (user) {
       const token = await user.getIdToken();
       config.headers.Authorization = `Bearer ${token}`;
+      
+      // Add company context if available
+      const currentCompanyKey = `last_company_${user.uid}`;
+      const currentCompanyId = localStorage.getItem(currentCompanyKey);
+      if (currentCompanyId) {
+        config.headers['X-Company-ID'] = currentCompanyId;
+      }
     }
     return config;
   },

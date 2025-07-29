@@ -20,6 +20,11 @@ import SprintPlanning from './pages/SprintPlanning';
 import Retrospective from './pages/Retrospective';
 import TeamSettings from './pages/TeamSettings';
 
+// Company Components
+import CompanySelector from './components/CompanySelector';
+import JoinCompany from './components/JoinCompany';
+import AdminCompanyCreator from './components/AdminCompanyCreator.js';
+
 function App() {
   return (
     <AuthProvider>
@@ -33,6 +38,12 @@ function App() {
                 
                 {/* Protected Routes */}
                 <Route element={<PrivateRoute />}>
+                  {/* Company Selection - No Navbar */}
+                  <Route path="/company/select" element={<CompanySelector />} />
+                  <Route path="/company/join" element={<JoinCompany />} />
+                  <Route path="/company/create" element={<AdminCompanyCreator />} />
+                  
+                  {/* Main App with Navbar */}
                   <Route element={<WithNavbar />}>
                     <Route path="/dashboard" element={<Dashboard />} />
                     <Route path="/standup" element={<StandupForm />} />

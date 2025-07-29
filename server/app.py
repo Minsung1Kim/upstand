@@ -31,7 +31,7 @@ openai.api_key = os.getenv('OPENAI_API_KEY')
 
 # Authentication decorator
 def require_auth(f):
-    """Decorator to verify Firebase Auth token"""
+    """Decorator to verify Firebase Auth token and extract company context"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
         id_token = request.headers.get('Authorization')
@@ -47,6 +47,10 @@ def require_auth(f):
             decoded_token = auth.verify_id_token(id_token)
             request.user_id = decoded_token['uid']
             request.user_email = decoded_token.get('email', '')
+            
+            # Extract company context from header
+            request.company_id = request.headers.get('X-Company-ID', 'default')
+            
         except Exception as e:
             return jsonify({'error': 'Invalid authorization token', 'details': str(e)}), 401
         
@@ -191,13 +195,14 @@ def health_check():
 @app.route('/api/teams', methods=['GET'])
 @require_auth
 def get_teams():
-    """Get all teams for current user"""
+    """Get all teams for current user in the current company"""
     try:
         user_id = request.user_id
+        company_id = request.company_id
         
-        # Query teams where user is a member
+        # Query teams where user is a member and belongs to current company
         teams_ref = db.collection('teams')
-        query = teams_ref.where('members', 'array_contains', user_id)
+        query = teams_ref.where('members', 'array_contains', user_id).where('company_id', '==', company_id)
         teams = query.stream()
         
         team_list = []
@@ -250,10 +255,11 @@ def get_teams():
 @app.route('/api/teams', methods=['POST'])
 @require_auth
 def create_team():
-    """Create a new team"""
+    """Create a new team in the current company"""
     try:
         user_id = request.user_id
         user_email = request.user_email
+        company_id = request.company_id
         
         data = request.get_json()
         team_name = data.get('name', '').strip()
@@ -269,7 +275,7 @@ def create_team():
             'name': team_name,
             'description': data.get('description', ''),
             'owner_id': user_id,
-            'company_id': data.get('company_id', 'default'),
+            'company_id': company_id,  # Use company from request context
             'members': [user_id],  # Owner is automatically a member
             'member_roles': {
                 user_id: 'OWNER'
@@ -536,19 +542,27 @@ def leave_team(team_id):
 @app.route('/api/submit-standup', methods=['POST'])
 @require_auth
 def submit_standup():
-    """Submit daily standup and receive AI summary"""
+    """Submit daily standup and receive AI summary for current company"""
     try:
         data = request.json
         team_id = data.get('team_id')
+        company_id = request.company_id
         
         if not team_id:
             return jsonify({'error': 'team_id is required'}), 400
+        
+        # Verify team belongs to current company
+        team_ref = db.collection('teams').document(team_id)
+        team_doc = team_ref.get()
+        if not team_doc.exists or team_doc.to_dict().get('company_id') != company_id:
+            return jsonify({'error': 'Team not found or access denied'}), 403
         
         # Create standup entry
         standup_data = {
             'user_id': request.user_id,
             'user_email': request.user_email,
             'team_id': team_id,
+            'company_id': company_id,
             'yesterday': data.get('yesterday', ''),
             'today': data.get('today', ''),
             'blockers': data.get('blockers', ''),
@@ -567,9 +581,9 @@ def submit_standup():
         # Save to Firestore
         doc_ref = db.collection('standups').add(standup_data)
         
-        # Get today's standups for the team
+        # Get today's standups for the team in current company
         today = datetime.utcnow().strftime('%Y-%m-%d')
-        team_standups = db.collection('standups').where('team_id', '==', team_id).where('date', '==', today).get()
+        team_standups = db.collection('standups').where('team_id', '==', team_id).where('company_id', '==', company_id).where('date', '==', today).get()
         
         standup_entries = []
         for doc in team_standups:
@@ -601,19 +615,26 @@ def submit_standup():
 @app.route('/api/dashboard', methods=['GET'])
 @require_auth
 def get_dashboard():
-    """Get dashboard data for current user"""
+    """Get dashboard data for current user in current company"""
     try:
         user_id = request.user_id
+        company_id = request.company_id
         team_id = request.args.get('team_id')
         
         if not team_id:
             return jsonify({'error': 'team_id is required'}), 400
         
+        # Verify team belongs to current company
+        team_ref = db.collection('teams').document(team_id)
+        team_doc = team_ref.get()
+        if not team_doc.exists or team_doc.to_dict().get('company_id') != company_id:
+            return jsonify({'error': 'Team not found or access denied'}), 403
+        
         # Get today's date
         today = datetime.utcnow().strftime('%Y-%m-%d')
         
-        # Get today's standups for the team
-        team_standups = db.collection('standups').where('team_id', '==', team_id).where('date', '==', today).get()
+        # Get today's standups for the team in current company
+        team_standups = db.collection('standups').where('team_id', '==', team_id).where('company_id', '==', company_id).where('date', '==', today).get()
         
         standup_count = len(list(team_standups))
         
@@ -688,12 +709,22 @@ def get_dashboard():
 @app.route('/api/create-sprint', methods=['POST'])
 @require_auth
 def create_sprint():
-    """Create a new sprint"""
+    """Create a new sprint in current company"""
     try:
         data = request.json
+        company_id = request.company_id
+        team_id = data.get('team_id')
+        
+        # Verify team belongs to current company
+        if team_id:
+            team_ref = db.collection('teams').document(team_id)
+            team_doc = team_ref.get()
+            if not team_doc.exists or team_doc.to_dict().get('company_id') != company_id:
+                return jsonify({'error': 'Team not found or access denied'}), 403
         
         sprint_data = {
-            'team_id': data.get('team_id'),
+            'team_id': team_id,
+            'company_id': company_id,
             'name': data.get('name'),
             'start_date': data.get('start_date'),
             'end_date': data.get('end_date'),
@@ -723,12 +754,22 @@ def create_sprint():
 @app.route('/api/create-retrospective', methods=['POST'])
 @require_auth
 def create_retrospective():
-    """Create a new retrospective"""
+    """Create a new retrospective in current company"""
     try:
         data = request.json
+        company_id = request.company_id
+        team_id = data.get('team_id')
+        
+        # Verify team belongs to current company
+        if team_id:
+            team_ref = db.collection('teams').document(team_id)
+            team_doc = team_ref.get()
+            if not team_doc.exists or team_doc.to_dict().get('company_id') != company_id:
+                return jsonify({'error': 'Team not found or access denied'}), 403
         
         retro_data = {
-            'team_id': data.get('team_id'),
+            'team_id': team_id,
+            'company_id': company_id,
             'sprint_id': data.get('sprint_id'),
             'what_went_well': data.get('what_went_well', []),
             'what_could_improve': data.get('what_could_improve', []),

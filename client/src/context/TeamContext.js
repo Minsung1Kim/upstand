@@ -1,5 +1,6 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import { useAuth } from './AuthContext';
+import { useCompany } from './CompanyContext';
 import api from '../services/api';
 
 const TeamContext = createContext({});
@@ -13,16 +14,17 @@ export function TeamProvider({ children }) {
   const [currentTeam, setCurrentTeam] = useState(null);
   const [loading, setLoading] = useState(true);
   const { currentUser } = useAuth();
+  const { currentCompany } = useCompany();
 
   useEffect(() => {
-    if (currentUser) {
+    if (currentUser && currentCompany) {
       fetchTeams();
     } else {
       setTeams([]);
       setCurrentTeam(null);
       setLoading(false);
     }
-  }, [currentUser]);
+  }, [currentUser, currentCompany]);
 
   const fetchTeams = async () => {
     try {
@@ -55,7 +57,11 @@ export function TeamProvider({ children }) {
     try {
       // Try API first
       console.log('Attempting to create team via API:', teamData);
-      const response = await api.post('/teams', teamData);
+      const teamPayload = {
+        ...teamData,
+        company_id: currentCompany?.id || 'default'
+      };
+      const response = await api.post('/teams', teamPayload);
       await fetchTeams(); // Refresh from API
       return response.data;
     } catch (error) {
@@ -68,6 +74,7 @@ export function TeamProvider({ children }) {
         role: 'OWNER',
         member_count: 1,
         owner_name: currentUser?.email || 'You',
+        company_id: currentCompany?.id || 'default',
         created_at: new Date().toISOString()
       };
       
@@ -96,10 +103,13 @@ export function TeamProvider({ children }) {
   // Helper functions for localStorage
   const getLocalTeams = () => {
     try {
-      if (!currentUser?.uid) return [];
+      if (!currentUser?.uid || !currentCompany?.id) return [];
       const key = `teams_${currentUser.uid}`;
       const stored = localStorage.getItem(key);
-      return stored ? JSON.parse(stored) : [];
+      const allTeams = stored ? JSON.parse(stored) : [];
+      
+      // Filter teams by current company
+      return allTeams.filter(team => team.company_id === currentCompany.id);
     } catch (error) {
       console.error('Error reading teams from localStorage:', error);
       return [];
@@ -108,9 +118,18 @@ export function TeamProvider({ children }) {
 
   const saveLocalTeams = (teams) => {
     try {
-      if (!currentUser?.uid) return;
+      if (!currentUser?.uid || !currentCompany?.id) return;
       const key = `teams_${currentUser.uid}`;
-      localStorage.setItem(key, JSON.stringify(teams));
+      
+      // Get all teams from storage
+      const stored = localStorage.getItem(key);
+      const allTeams = stored ? JSON.parse(stored) : [];
+      
+      // Remove teams for current company and add new ones
+      const otherCompanyTeams = allTeams.filter(team => team.company_id !== currentCompany.id);
+      const updatedTeams = [...otherCompanyTeams, ...teams];
+      
+      localStorage.setItem(key, JSON.stringify(updatedTeams));
     } catch (error) {
       console.error('Error saving teams to localStorage:', error);
     }
