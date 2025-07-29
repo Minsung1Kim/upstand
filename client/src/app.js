@@ -37,6 +37,8 @@ function App() {
                   <Route path="/sprint-planning" element={<SprintPlanning />} />
                   <Route path="/retrospective" element={<Retrospective />} />
                   <Route path="/team-settings" element={<TeamSettings />} />
+                  {/* Add redirect from /teams to /team-settings */}
+                  <Route path="/teams" element={<Navigate to="/team-settings" replace />} />
                 </Route>
               </Route>
               
