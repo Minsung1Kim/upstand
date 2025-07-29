@@ -134,3 +134,8 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+
+
+# Add to .gitignore
+echo "server/firebase-service-account.json" >> .gitignore
+echo "*.json" >> server/.gitignore
