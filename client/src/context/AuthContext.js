@@ -25,10 +25,27 @@ export function AuthProvider({ children }) {
   const [error, setError] = useState('');
 
   // Sign up function
-  async function signup(email, password) {
+  async function signup(email, password, role = 'MEMBER', companyCode = '') {
     try {
       setError('');
       const result = await createUserWithEmailAndPassword(auth, email, password);
+      
+      // Save role with user
+      localStorage.setItem(`user_role_${result.user.uid}`, role);
+      
+      // If they're joining a company, save that too
+      if (role === 'MEMBER' && companyCode) {
+        const userCompaniesKey = `user_companies_${result.user.uid}`;
+        const company = {
+          id: companyCode.toUpperCase(),
+          name: companyCode.toUpperCase(),
+          code: companyCode.toUpperCase(),
+          role: 'MEMBER'
+        };
+        localStorage.setItem(userCompaniesKey, JSON.stringify([company]));
+        localStorage.setItem(`last_company_${result.user.uid}`, company.id);
+      }
+      
       return result;
     } catch (error) {
       setError(error.message);
@@ -85,6 +102,14 @@ export function AuthProvider({ children }) {
     return null;
   }
 
+  // Get user role
+  function getUserRole() {
+    if (currentUser) {
+      return localStorage.getItem(`user_role_${currentUser.uid}`) || 'MEMBER';
+    }
+    return 'MEMBER';
+  }
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
@@ -101,6 +126,7 @@ export function AuthProvider({ children }) {
     signInWithGoogle,
     logout,
     getAuthToken,
+    getUserRole,
     error
   };
 

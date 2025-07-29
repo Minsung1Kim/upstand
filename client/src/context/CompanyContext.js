@@ -1,0 +1,121 @@
+// src/context/CompanyContext.js - Updated
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import { useAuth } from './AuthContext';
+
+const CompanyContext = createContext();
+export const useCompany = () => useContext(CompanyContext);
+
+export const CompanyProvider = ({ children }) => {
+  const { currentUser } = useAuth();
+  const [userCompanies, setUserCompanies] = useState([]); // All companies user belongs to
+  const [currentCompany, setCurrentCompany] = useState(null); // Currently selected company
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (currentUser) {
+      loadUserCompanies();
+    } else {
+      setUserCompanies([]);
+      setCurrentCompany(null);
+      setLoading(false);
+    }
+  }, [currentUser]);
+
+  const loadUserCompanies = async () => {
+    try {
+      // Get companies from localStorage (later: from backend)
+      const userCompaniesKey = `user_companies_${currentUser.uid}`;
+      const stored = localStorage.getItem(userCompaniesKey);
+      const companies = stored ? JSON.parse(stored) : [];
+      
+      setUserCompanies(companies);
+      
+      // Set current company (last used or first available)
+      const lastUsedKey = `last_company_${currentUser.uid}`;
+      const lastUsed = localStorage.getItem(lastUsedKey);
+      const defaultCompany = companies.find(c => c.id === lastUsed) || companies[0];
+      
+      setCurrentCompany(defaultCompany || null);
+    } catch (error) {
+      console.error('Error loading companies:', error);
+      setUserCompanies([]);
+      setCurrentCompany(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const switchCompany = (company) => {
+    setCurrentCompany(company);
+    // Remember last used company
+    localStorage.setItem(`last_company_${currentUser.uid}`, company.id);
+  };
+
+  const joinCompany = async (companyCode) => {
+    try {
+      // For now, create company object from code
+      const newCompany = {
+        id: companyCode.toUpperCase(),
+        name: companyCode.toUpperCase(),
+        code: companyCode.toUpperCase(),
+        role: 'MEMBER'
+      };
+
+      const updatedCompanies = [...userCompanies, newCompany];
+      setUserCompanies(updatedCompanies);
+      
+      // Save to localStorage
+      const userCompaniesKey = `user_companies_${currentUser.uid}`;
+      localStorage.setItem(userCompaniesKey, JSON.stringify(updatedCompanies));
+      
+      // Switch to new company
+      switchCompany(newCompany);
+      
+      return newCompany;
+    } catch (error) {
+      throw new Error('Failed to join company');
+    }
+  };
+
+  const createCompany = async (companyName) => {
+    try {
+      const companyCode = companyName.toUpperCase().replace(/\s+/g, '') + Math.floor(Math.random() * 1000);
+      
+      const newCompany = {
+        id: companyCode,
+        name: companyName,
+        code: companyCode,
+        role: 'OWNER'
+      };
+
+      const updatedCompanies = [...userCompanies, newCompany];
+      setUserCompanies(updatedCompanies);
+      
+      // Save to localStorage
+      const userCompaniesKey = `user_companies_${currentUser.uid}`;
+      localStorage.setItem(userCompaniesKey, JSON.stringify(updatedCompanies));
+      
+      // Switch to new company
+      switchCompany(newCompany);
+      
+      return newCompany;
+    } catch (error) {
+      throw new Error('Failed to create company');
+    }
+  };
+
+  const value = {
+    userCompanies,
+    currentCompany,
+    switchCompany,
+    joinCompany,
+    createCompany,
+    loading
+  };
+
+  return (
+    <CompanyContext.Provider value={value}>
+      {children}
+    </CompanyContext.Provider>
+  );
+};

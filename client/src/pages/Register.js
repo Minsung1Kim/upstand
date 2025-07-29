@@ -6,6 +6,8 @@ function Register() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [role, setRole] = useState('MEMBER');
+  const [companyCode, setCompanyCode] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const { signup } = useAuth();
@@ -21,11 +23,27 @@ function Register() {
     if (password.length < 6) {
       return setError('Password must be at least 6 characters');
     }
+
+    // If they're a member, they need a company code
+    if (role === 'MEMBER' && !companyCode.trim()) {
+      return setError('Company code is required for team members');
+    }
+
+    // If they're a member, validate company code exists
+    if (role === 'MEMBER') {
+      const companiesKey = 'all_companies';
+      const allCompanies = JSON.parse(localStorage.getItem(companiesKey) || '[]');
+      const validCompany = allCompanies.find(c => c.code === companyCode.toUpperCase());
+      
+      if (!validCompany) {
+        return setError('Invalid company code. Please check with your manager.');
+      }
+    }
     
     try {
       setError('');
       setLoading(true);
-      await signup(email, password);
+      await signup(email, password, role, companyCode);
       navigate('/dashboard');
     } catch (error) {
       setError('Failed to create account: ' + error.message);
@@ -69,10 +87,41 @@ function Register() {
               className="appearance-none relative block w-full px-3 py-2 border border-gray-300 rounded-md"
               placeholder="Confirm password"
             />
+
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700">Your Role</label>
+              <select 
+                value={role} 
+                onChange={(e) => setRole(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="MEMBER">Team Member</option>
+                <option value="MANAGER">Manager/PM</option>
+              </select>
+              <p className="text-xs text-gray-500">
+                {role === 'MANAGER' 
+                  ? 'Managers can create companies and have admin access' 
+                  : 'Team members need a company code from their manager'
+                }
+              </p>
+            </div>
+
+            {role === 'MEMBER' && (
+              <input
+                type="text"
+                required
+                value={companyCode}
+                onChange={(e) => setCompanyCode(e.target.value.toUpperCase())}
+                className="appearance-none relative block w-full px-3 py-2 border border-gray-300 rounded-md"
+                placeholder="Company Code (get from your manager)"
+              />
+            )}
           </div>
 
           {error && (
-            <div className="text-red-500 text-sm">{error}</div>
+            <div className="text-red-500 text-sm bg-red-50 border border-red-200 rounded p-3">
+              {error}
+            </div>
           )}
 
           <button
