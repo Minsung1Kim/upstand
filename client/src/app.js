@@ -6,6 +6,7 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
+import { CompanyProvider } from './context/CompanyContext';
 import { TeamProvider } from './context/TeamContext';
 import PrivateRoute from './components/PrivateRoute';
 import Navbar from './components/Navbar';
@@ -22,31 +23,33 @@ import TeamSettings from './pages/TeamSettings';
 function App() {
   return (
     <AuthProvider>
-      <TeamProvider>
-        <Router>
-          <div className="min-h-screen bg-gray-50">
-            <Routes>
-              <Route path="/login" element={<Login />} />
-              <Route path="/register" element={<Register />} />
-              
-              {/* Protected Routes */}
-              <Route element={<PrivateRoute />}>
-                <Route element={<WithNavbar />}>
-                  <Route path="/dashboard" element={<Dashboard />} />
-                  <Route path="/standup" element={<StandupForm />} />
-                  <Route path="/sprint-planning" element={<SprintPlanning />} />
-                  <Route path="/retrospective" element={<Retrospective />} />
-                  <Route path="/team-settings" element={<TeamSettings />} />
-                  {/* Add redirect from /teams to /team-settings */}
-                  <Route path="/teams" element={<Navigate to="/team-settings" replace />} />
+      <CompanyProvider>
+        <TeamProvider>
+          <Router>
+            <div className="min-h-screen bg-gray-50">
+              <Routes>
+                <Route path="/login" element={<Login />} />
+                <Route path="/register" element={<Register />} />
+                
+                {/* Protected Routes */}
+                <Route element={<PrivateRoute />}>
+                  <Route element={<WithNavbar />}>
+                    <Route path="/dashboard" element={<Dashboard />} />
+                    <Route path="/standup" element={<StandupForm />} />
+                    <Route path="/sprint-planning" element={<SprintPlanning />} />
+                    <Route path="/retrospective" element={<Retrospective />} />
+                    <Route path="/team-settings" element={<TeamSettings />} />
+                    {/* Add redirect from /teams to /team-settings */}
+                    <Route path="/teams" element={<Navigate to="/team-settings" replace />} />
+                  </Route>
                 </Route>
-              </Route>
-              
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
-            </Routes>
-          </div>
-        </Router>
-      </TeamProvider>
+                
+                <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              </Routes>
+            </div>
+          </Router>
+        </TeamProvider>
+      </CompanyProvider>
     </AuthProvider>
   );
 }
