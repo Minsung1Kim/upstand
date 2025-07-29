@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useTeam } from '../context/TeamContext';
 
 function Navbar() {
-  const { logout, currentUser } = useAuth();
+  const { logout, currentUser, getUserProfile } = useAuth();
   const { currentTeam } = useTeam();
   const navigate = useNavigate();
 
@@ -17,18 +17,12 @@ function Navbar() {
     }
   };
 
-  // Get display name - prefer display name, fallback to email, then Unknown
-  const getDisplayName = () => {
-    if (currentUser?.displayName) {
-      return currentUser.displayName;
-    }
-    if (currentUser?.email) {
-      // Extract name from email (e.g., john.doe@company.com -> john.doe)
-      const emailName = currentUser.email.split('@')[0];
-      return emailName.charAt(0).toUpperCase() + emailName.slice(1);
-    }
-    return 'User';
-  };
+  // Get user profile information
+  const userProfile = getUserProfile();
+  const displayName = userProfile?.firstName ? `${userProfile.firstName} ${userProfile.lastName}`.trim() : 'User';
+  const initials = userProfile?.firstName ? 
+    `${userProfile.firstName.charAt(0)}${userProfile.lastName.charAt(0)}`.toUpperCase() : 
+    'U';
 
   return (
     <nav className="bg-blue-600 text-white shadow-lg">
@@ -57,7 +51,7 @@ function Navbar() {
             {/* Welcome Message */}
             <div className="flex items-center space-x-3">
               <div className="text-right hidden sm:block">
-                <div className="text-sm font-medium">Welcome, {getDisplayName()}</div>
+                <div className="text-sm font-medium">Welcome, {displayName}</div>
                 {currentUser?.email && (
                   <div className="text-xs text-blue-200">{currentUser.email}</div>
                 )}
@@ -66,7 +60,7 @@ function Navbar() {
               {/* User Avatar */}
               <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center">
                 <span className="text-sm font-semibold">
-                  {getDisplayName().charAt(0).toUpperCase()}
+                  {initials}
                 </span>
               </div>
               

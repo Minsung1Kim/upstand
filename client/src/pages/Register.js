@@ -3,6 +3,8 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 function Register() {
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -15,6 +17,10 @@ function Register() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
+    if (!firstName.trim() || !lastName.trim()) {
+      return setError('First name and last name are required');
+    }
     
     if (password !== confirmPassword) {
       return setError('Passwords do not match');
@@ -43,7 +49,17 @@ function Register() {
     try {
       setError('');
       setLoading(true);
-      await signup(email, password, role, companyCode);
+      
+      const userData = {
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        email,
+        password,
+        role,
+        companyCode: companyCode.toUpperCase()
+      };
+      
+      await signup(userData);
       navigate('/dashboard');
     } catch (error) {
       setError('Failed to create account: ' + error.message);
@@ -73,28 +89,50 @@ function Register() {
 
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           <div className="space-y-4">
+            {/* Name Fields */}
+            <div className="grid grid-cols-2 gap-3">
+              <input
+                type="text"
+                required
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+                className="appearance-none relative block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="First name"
+              />
+              <input
+                type="text"
+                required
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+                className="appearance-none relative block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Last name"
+              />
+            </div>
+            
             <input
               type="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="appearance-none relative block w-full px-3 py-2 border border-gray-300 rounded-md"
+              className="appearance-none relative block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="Email address"
             />
+            
             <input
               type="password"
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="appearance-none relative block w-full px-3 py-2 border border-gray-300 rounded-md"
-              placeholder="Password"
+              className="appearance-none relative block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Password (min 6 characters)"
             />
+            
             <input
               type="password"
               required
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
-              className="appearance-none relative block w-full px-3 py-2 border border-gray-300 rounded-md"
+              className="appearance-none relative block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="Confirm password"
             />
 
@@ -123,7 +161,7 @@ function Register() {
                   required
                   value={companyCode}
                   onChange={(e) => setCompanyCode(e.target.value.toUpperCase())}
-                  className="appearance-none relative block w-full px-3 py-2 border border-gray-300 rounded-md"
+                  className="appearance-none relative block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="Company Code (e.g., ACME123)"
                 />
                 <div className="bg-yellow-50 border border-yellow-200 rounded p-2">
@@ -152,13 +190,13 @@ function Register() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2 px-4 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400"
+            className="w-full py-2 px-4 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 transition-colors"
           >
             {loading ? 'Creating account...' : 'Sign up'}
           </button>
 
           <p className="text-center text-sm">
-            Already have an account? <Link to="/login" className="text-blue-600">Sign in</Link>
+            Already have an account? <Link to="/login" className="text-blue-600 hover:text-blue-800">Sign in</Link>
           </p>
         </form>
       </div>

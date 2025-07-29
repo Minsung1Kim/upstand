@@ -9,7 +9,8 @@ import {
   createUserWithEmailAndPassword,
   signOut,
   onAuthStateChanged,
-  signInWithPopup
+  signInWithPopup,
+  updateProfile
 } from 'firebase/auth';
 import { auth, googleProvider } from '../firebase';
 
@@ -24,13 +25,31 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // Sign up function
-  async function signup(email, password, role = 'MEMBER', companyCode = '') {
+  // Sign up function - now accepts userData object
+  async function signup(userData) {
     try {
       setError('');
+      const { firstName, lastName, email, password, role, companyCode } = userData;
+      
       const result = await createUserWithEmailAndPassword(auth, email, password);
       
-      // Save role with user
+      // Update Firebase profile with display name
+      const displayName = `${firstName} ${lastName}`;
+      await updateProfile(result.user, {
+        displayName: displayName
+      });
+      
+      // Save additional user data to localStorage
+      const userProfile = {
+        firstName,
+        lastName,
+        displayName,
+        email,
+        role,
+        createdAt: new Date().toISOString()
+      };
+      
+      localStorage.setItem(`user_profile_${result.user.uid}`, JSON.stringify(userProfile));
       localStorage.setItem(`user_role_${result.user.uid}`, role);
       
       // If they're joining a company, save that too
@@ -45,6 +64,12 @@ export function AuthProvider({ children }) {
         localStorage.setItem(userCompaniesKey, JSON.stringify([company]));
         localStorage.setItem(`last_company_${result.user.uid}`, company.id);
       }
+      
+      // Update currentUser to include the new profile info
+      setCurrentUser({
+        ...result.user,
+        displayName
+      });
       
       return result;
     } catch (error) {
@@ -70,6 +95,26 @@ export function AuthProvider({ children }) {
     try {
       setError('');
       const result = await signInWithPopup(auth, googleProvider);
+      
+      // If this is their first time signing in with Google, save profile
+      if (result.user && result.user.displayName) {
+        const names = result.user.displayName.split(' ');
+        const firstName = names[0] || '';
+        const lastName = names.slice(1).join(' ') || '';
+        
+        const userProfile = {
+          firstName,
+          lastName,
+          displayName: result.user.displayName,
+          email: result.user.email,
+          role: 'MEMBER', // Default role for Google sign-in
+          createdAt: new Date().toISOString()
+        };
+        
+        localStorage.setItem(`user_profile_${result.user.uid}`, JSON.stringify(userProfile));
+        localStorage.setItem(`user_role_${result.user.uid}`, 'MEMBER');
+      }
+      
       return result;
     } catch (error) {
       if (error.code === 'auth/popup-closed-by-user') {
@@ -110,6 +155,69 @@ export function AuthProvider({ children }) {
     return 'MEMBER';
   }
 
+  // Get user profile
+  function getUserProfile() {
+    if (currentUser) {
+      const stored = localStorage.getItem(`user_profile_${currentUser.uid}`);
+      if (stored) {
+        return JSON.parse(stored);
+      }
+      
+      // Fallback for existing users without stored profile
+      if (currentUser.displayName) {
+        const names = currentUser.displayName.split(' ');
+        return {
+          firstName: names[0] || '',
+          lastName: names.slice(1).join(' ') || '',
+          displayName: currentUser.displayName,
+          email: currentUser.email,
+          role: getUserRole()
+        };
+      }
+      
+      // Last fallback - use email
+      return {
+        firstName: currentUser.email?.split('@')[0] || 'User',
+        lastName: '',
+        displayName: currentUser.email?.split('@')[0] || 'User',
+        email: currentUser.email,
+        role: getUserRole()
+      };
+    }
+    return null;
+  }
+
+  // Update user profile
+  async function updateUserProfile(updates) {
+    if (!currentUser) return;
+    
+    try {
+      const currentProfile = getUserProfile();
+      const updatedProfile = { ...currentProfile, ...updates };
+      
+      // Update Firebase display name if firstName or lastName changed
+      if (updates.firstName || updates.lastName) {
+        const displayName = `${updatedProfile.firstName} ${updatedProfile.lastName}`;
+        await updateProfile(currentUser, { displayName });
+        updatedProfile.displayName = displayName;
+        
+        // Update current user state
+        setCurrentUser({
+          ...currentUser,
+          displayName
+        });
+      }
+      
+      // Save to localStorage
+      localStorage.setItem(`user_profile_${currentUser.uid}`, JSON.stringify(updatedProfile));
+      
+      return updatedProfile;
+    } catch (error) {
+      setError(error.message);
+      throw error;
+    }
+  }
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
@@ -127,6 +235,8 @@ export function AuthProvider({ children }) {
     logout,
     getAuthToken,
     getUserRole,
+    getUserProfile,
+    updateUserProfile,
     error
   };
 
