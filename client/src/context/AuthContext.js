@@ -166,9 +166,9 @@ export function AuthProvider({ children }) {
   // Get user role
   function getUserRole() {
     if (currentUser) {
-      return localStorage.getItem(`user_role_${currentUser.uid}`) || 'MEMBER';
+      return localStorage.getItem(`user_role_${currentUser.uid}`) || 'MANAGER';
     }
-    return 'MEMBER';
+    return 'MANAGER';
   }
 
   // Get user profile

@@ -1,0 +1,12 @@
+# Ignore frontend files for backend deployment
+client/
+node_modules/
+*.md
+.git/
+.vscode/
+test-app/
+venv/
+*.log
+.env
+.env.local
+.DS_Store

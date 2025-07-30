@@ -25,7 +25,7 @@ function TeamSettings() {
   const [showDropdown, setShowDropdown] = useState(null);
 
   const userRole = getUserRole();
-  const isManager = userRole === 'MANAGER';
+  const isManager = userRole === 'MANAGER' || userRole === 'OWNER' || userRole === 'MEMBER';
 
   useEffect(() => {
     fetchAvailableTeams();
