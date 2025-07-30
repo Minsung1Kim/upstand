@@ -24,9 +24,12 @@ load_dotenv()
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key-12345')
 
-# Get allowed origins from environment or use defaults
-allowed_origins_str = os.getenv('ALLOWED_ORIGINS', 'http://localhost:3000,https://upstand-omega.vercel.app')
-allowed_origins = [origin.strip() for origin in allowed_origins_str.split(',')]
+# Hardcode allowed origins for testing - Railway env vars seem to have issues
+allowed_origins = ['http://localhost:3000', 'https://upstand-omega.vercel.app']
+
+# Debug logging
+print(f"🔍 ALLOWED_ORIGINS env var: {os.getenv('ALLOWED_ORIGINS')}")
+print(f"🔍 Hardcoded allowed_origins: {allowed_origins}")
 
 # Configure CORS with more permissive settings for debugging
 CORS(app, 
