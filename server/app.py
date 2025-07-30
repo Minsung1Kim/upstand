@@ -25,14 +25,16 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key-12345')
 
 # Get allowed origins from environment or use defaults
-allowed_origins = os.getenv('ALLOWED_ORIGINS', 'http://localhost:3000,https://*.vercel.app').split(',')
+allowed_origins_str = os.getenv('ALLOWED_ORIGINS', 'http://localhost:3000,https://upstand-omega.vercel.app')
+allowed_origins = [origin.strip() for origin in allowed_origins_str.split(',')]
 
-# Configure CORS
+# Configure CORS with more permissive settings for debugging
 CORS(app, 
      origins=allowed_origins,
      methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-     allow_headers=['Content-Type', 'Authorization', 'X-Company-ID'],
-     supports_credentials=True)
+     allow_headers=['Content-Type', 'Authorization', 'X-Company-ID', 'Access-Control-Allow-Origin'],
+     supports_credentials=True,
+     expose_headers=['Content-Type', 'Authorization'])
 
 # Initialize Socket.IO with proper configuration
 socketio = SocketIO(app, 
@@ -1132,6 +1134,16 @@ def create_retrospective():
 def railway_health():
     """Railway health check endpoint"""
     return jsonify({'status': 'healthy', 'service': 'upstand-backend'})
+
+# CORS test endpoint
+@app.route('/cors-test', methods=['GET', 'OPTIONS'])
+def cors_test():
+    """Test CORS configuration"""
+    return jsonify({
+        'message': 'CORS test successful',
+        'allowed_origins': allowed_origins,
+        'request_origin': request.headers.get('Origin', 'No origin header')
+    })
 
 if __name__ == '__main__':
     # Get configuration from environment - Railway sets PORT automatically
