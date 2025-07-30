@@ -94,7 +94,15 @@ export function AuthProvider({ children }) {
   async function signInWithGoogle() {
     try {
       setError('');
+      console.log('Attempting Google sign-in...');
+      
+      // Check if Firebase is properly configured
+      if (!auth || !googleProvider) {
+        throw new Error('Firebase authentication is not properly configured');
+      }
+      
       const result = await signInWithPopup(auth, googleProvider);
+      console.log('Google sign-in successful:', result.user?.email);
       
       // If this is their first time signing in with Google, save profile
       if (result.user && result.user.displayName) {
@@ -117,12 +125,20 @@ export function AuthProvider({ children }) {
       
       return result;
     } catch (error) {
+      console.error('Google sign-in error:', error);
+      
       if (error.code === 'auth/popup-closed-by-user') {
         setError('Sign-in was cancelled. Please try again.');
       } else if (error.code === 'auth/popup-blocked') {
         setError('Sign-in popup was blocked. Please allow popups for this site.');
+      } else if (error.code === 'auth/unauthorized-domain') {
+        setError('This domain is not authorized for Google sign-in. Please check Firebase configuration.');
+      } else if (error.code === 'auth/operation-not-allowed') {
+        setError('Google sign-in is not enabled. Please check Firebase Authentication settings.');
+      } else if (error.code === 'auth/invalid-api-key') {
+        setError('Invalid Firebase configuration. Please check your API key.');
       } else {
-        setError(error.message);
+        setError(`Google sign-in failed: ${error.message}`);
       }
       throw error;
     }

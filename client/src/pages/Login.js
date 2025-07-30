@@ -10,6 +10,7 @@ import { ExclamationCircleIcon } from '@heroicons/react/24/outline';
 import { colors } from '../utils/colors';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
+import FirebaseDebug from '../components/debug/FirebaseDebug';
 
 function Login() {
   const [email, setEmail] = useState('');
@@ -48,6 +49,7 @@ function Login() {
       navigate('/dashboard');
     } catch (error) {
       console.error('Google sign-in failed:', error);
+      // Error is already set by the signInWithGoogle function in AuthContext
     } finally {
       setGoogleLoading(false);
     }
@@ -182,6 +184,9 @@ function Login() {
           </form>
         </div>
       </div>
+      
+      {/* Debug component - only shows in development */}
+      <FirebaseDebug />
     </div>
   );
 }
