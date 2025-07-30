@@ -8,6 +8,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from 'react-
 import { AuthProvider } from './context/AuthContext';
 import { CompanyProvider } from './context/CompanyContext';
 import { TeamProvider } from './context/TeamContext';
+import { RealTimeProvider } from './context/RealTimeContext';
 import PrivateRoute from './components/PrivateRoute';
 import Navbar from './components/Navbar';
 
@@ -25,14 +26,23 @@ import CompanySelector from './components/CompanySelector';
 import JoinCompany from './components/JoinCompany';
 import AdminCompanyCreator from './components/AdminCompanyCreator.js';
 
+// Real-time Components
+import NotificationToast from './components/realtime/NotificationToast';
+import ConnectionStatus from './components/realtime/ConnectionStatus';
+
 function App() {
   return (
     <AuthProvider>
       <CompanyProvider>
         <TeamProvider>
-          <Router>
-            <div className="min-h-screen bg-gray-50">
-              <Routes>
+          <RealTimeProvider>
+            <Router>
+              <div className="min-h-screen bg-gray-50">
+                {/* Real-time Components */}
+                <NotificationToast />
+                <ConnectionStatus />
+                
+                <Routes>
                 <Route path="/login" element={<Login />} />
                 <Route path="/register" element={<Register />} />
                 
@@ -56,9 +66,10 @@ function App() {
                 </Route>
                 
                 <Route path="/" element={<Navigate to="/dashboard" replace />} />
-              </Routes>
-            </div>
-          </Router>
+                </Routes>
+              </div>
+            </Router>
+          </RealTimeProvider>
         </TeamProvider>
       </CompanyProvider>
     </AuthProvider>

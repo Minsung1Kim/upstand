@@ -6,6 +6,7 @@ Main Flask application with routes for standup meetings, sprint planning, and re
 import os
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from flask_socketio import SocketIO, emit, join_room, leave_room, disconnect
 from datetime import datetime
 import firebase_admin
 from firebase_admin import credentials, firestore, auth
@@ -13,18 +14,56 @@ from dotenv import load_dotenv
 import openai
 from functools import wraps
 import json
+import threading
+import time
 
 # Load environment variables
 load_dotenv()
 
 # Initialize Flask app
 app = Flask(__name__)
-CORS(app, origins=["http://localhost:3000", "https://your-app.vercel.app"])
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key-12345')
+
+# Get allowed origins from environment or use defaults
+allowed_origins = os.getenv('ALLOWED_ORIGINS', 'http://localhost:3000,https://*.vercel.app').split(',')
+
+# Configure CORS
+CORS(app, 
+     origins=allowed_origins,
+     methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+     allow_headers=['Content-Type', 'Authorization', 'X-Company-ID'],
+     supports_credentials=True)
+
+# Initialize Socket.IO with proper configuration
+socketio = SocketIO(app, 
+                   cors_allowed_origins=allowed_origins,
+                   logger=False, 
+                   engineio_logger=False,
+                   ping_timeout=60,
+                   ping_interval=25)
 
 # Initialize Firebase Admin SDK
-cred = credentials.Certificate(os.getenv('FIREBASE_SERVICE_ACCOUNT_KEY'))
-firebase_admin.initialize_app(cred)
-db = firestore.client()
+firebase_key = os.getenv('FIREBASE_SERVICE_ACCOUNT_KEY')
+if firebase_key:
+    try:
+        # Try to parse as JSON string (for deployment)
+        if firebase_key.startswith('{'):
+            import json
+            firebase_config = json.loads(firebase_key)
+            cred = credentials.Certificate(firebase_config)
+        else:
+            # Use as file path (for local development)
+            cred = credentials.Certificate(firebase_key)
+        
+        firebase_admin.initialize_app(cred)
+        db = firestore.client()
+        print("Firebase initialized successfully")
+    except Exception as e:
+        print(f"Firebase initialization error: {e}")
+        db = None
+else:
+    print("Warning: FIREBASE_SERVICE_ACCOUNT_KEY not found")
+    db = None
 
 # Initialize OpenAI
 openai.api_key = os.getenv('OPENAI_API_KEY')
@@ -56,6 +95,34 @@ def require_auth(f):
         
         return f(*args, **kwargs)
     return decorated_function
+
+# WebSocket authentication helper
+def verify_socket_auth(auth_data):
+    """Verify authentication for WebSocket connections"""
+    try:
+        token = auth_data.get('token')
+        company_id = auth_data.get('company_id', 'default')
+        
+        if not token:
+            return None, None, None
+            
+        # Remove 'Bearer ' prefix if present
+        if token.startswith('Bearer '):
+            token = token[7:]
+            
+        # Verify the token
+        decoded_token = auth.verify_id_token(token)
+        user_id = decoded_token['uid']
+        user_email = decoded_token.get('email', '')
+        
+        return user_id, user_email, company_id
+    except Exception as e:
+        print(f"Socket auth error: {e}")
+        return None, None, None
+
+# Store active connections
+active_connections = {}  # {session_id: {user_id, user_email, company_id, team_id}}
+online_users = {}  # {company_id: {team_id: [user_objects]}}
 
 # AI Service Functions
 def summarize_standups(standup_entries):
@@ -176,17 +243,223 @@ def cluster_retrospective_feedback(feedback_list):
     except Exception as e:
         return {"themes": [], "overall_sentiment": "neutral", "suggested_actions": [], "error": str(e)}
 
+# ===== WEBSOCKET EVENT HANDLERS =====
+
+@socketio.on('connect')
+def handle_connect(auth):
+    """Handle client connection"""
+    print(f"Client connecting with auth: {auth}")
+    
+    # Verify authentication
+    user_id, user_email, company_id = verify_socket_auth(auth)
+    if not user_id:
+        print("Authentication failed for socket connection")
+        disconnect()
+        return False
+    
+    # Store connection info
+    session_id = request.sid
+    active_connections[session_id] = {
+        'user_id': user_id,
+        'user_email': user_email,
+        'company_id': company_id,
+        'connected_at': datetime.utcnow().isoformat()
+    }
+    
+    # Join company room
+    join_room(f"company_{company_id}")
+    
+    print(f"User {user_email} connected to company {company_id}")
+    emit('connected', {'status': 'connected', 'user_id': user_id})
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    """Handle client disconnection"""
+    session_id = request.sid
+    if session_id in active_connections:
+        user_info = active_connections[session_id]
+        company_id = user_info['company_id']
+        team_id = user_info.get('team_id')
+        
+        # Remove from online users
+        if company_id in online_users and team_id and team_id in online_users[company_id]:
+            online_users[company_id][team_id] = [
+                u for u in online_users[company_id][team_id] 
+                if u['userId'] != user_info['user_id']
+            ]
+            
+            # Broadcast updated online users to team
+            socketio.emit('users_online_updated', {
+                'online_users': online_users[company_id][team_id]
+            }, room=f"team_{company_id}_{team_id}")
+        
+        # Clean up connection
+        del active_connections[session_id]
+        print(f"User {user_info['user_email']} disconnected")
+
+@socketio.on('join_team')
+def handle_join_team(data):
+    """Join a team room for real-time updates"""
+    session_id = request.sid
+    if session_id not in active_connections:
+        emit('error', {'message': 'Not authenticated'})
+        return
+    
+    user_info = active_connections[session_id]
+    team_id = data.get('team_id')
+    company_id = user_info['company_id']
+    
+    if not team_id:
+        emit('error', {'message': 'team_id required'})
+        return
+    
+    # Verify team access
+    try:
+        team_ref = db.collection('teams').document(team_id)
+        team_doc = team_ref.get()
+        if not team_doc.exists:
+            emit('error', {'message': 'Team not found'})
+            return
+            
+        team_data = team_doc.to_dict()
+        if (team_data.get('company_id') != company_id or 
+            user_info['user_id'] not in team_data.get('members', [])):
+            emit('error', {'message': 'Access denied'})
+            return
+    except Exception as e:
+        emit('error', {'message': 'Failed to verify team access'})
+        return
+    
+    # Join team room
+    team_room = f"team_{company_id}_{team_id}"
+    join_room(team_room)
+    
+    # Update connection info
+    active_connections[session_id]['team_id'] = team_id
+    
+    # Add to online users
+    if company_id not in online_users:
+        online_users[company_id] = {}
+    if team_id not in online_users[company_id]:
+        online_users[company_id][team_id] = []
+    
+    # Check if user already in online list
+    user_exists = any(u['userId'] == user_info['user_id'] for u in online_users[company_id][team_id])
+    if not user_exists:
+        online_users[company_id][team_id].append({
+            'userId': user_info['user_id'],
+            'userEmail': user_info['user_email'],
+            'userName': user_info['user_email'].split('@')[0]
+        })
+    
+    # Broadcast updated online users to team
+    socketio.emit('users_online_updated', {
+        'online_users': online_users[company_id][team_id]
+    }, room=team_room)
+    
+    emit('team_joined', {'team_id': team_id, 'room': team_room})
+    print(f"User {user_info['user_email']} joined team {team_id}")
+
+@socketio.on('leave_team')
+def handle_leave_team(data):
+    """Leave a team room"""
+    session_id = request.sid
+    if session_id not in active_connections:
+        return
+    
+    user_info = active_connections[session_id]
+    team_id = data.get('team_id')
+    company_id = user_info['company_id']
+    
+    if team_id:
+        team_room = f"team_{company_id}_{team_id}"
+        leave_room(team_room)
+        
+        # Remove from online users
+        if company_id in online_users and team_id in online_users[company_id]:
+            online_users[company_id][team_id] = [
+                u for u in online_users[company_id][team_id] 
+                if u['userId'] != user_info['user_id']
+            ]
+            
+            # Broadcast updated online users
+            socketio.emit('users_online_updated', {
+                'online_users': online_users[company_id][team_id]
+            }, room=team_room)
+        
+        # Remove team from connection info
+        if 'team_id' in active_connections[session_id]:
+            del active_connections[session_id]['team_id']
+        
+        emit('team_left', {'team_id': team_id})
+        print(f"User {user_info['user_email']} left team {team_id}")
+
+@socketio.on('send_notification')
+def handle_send_notification(data):
+    """Send real-time notification"""
+    session_id = request.sid
+    if session_id not in active_connections:
+        emit('error', {'message': 'Not authenticated'})
+        return
+    
+    user_info = active_connections[session_id]
+    company_id = user_info['company_id']
+    team_id = data.get('team_id')
+    
+    notification = {
+        'id': f"notif_{int(time.time() * 1000)}",
+        'type': data.get('type', 'info'),
+        'title': data.get('title', 'Notification'),
+        'message': data.get('message', ''),
+        'sender': user_info['user_email'],
+        'timestamp': datetime.utcnow().isoformat(),
+        'team_id': team_id
+    }
+    
+    # Send to team room
+    if team_id:
+        team_room = f"team_{company_id}_{team_id}"
+        socketio.emit('notification', notification, room=team_room)
+    else:
+        # Send to company room
+        socketio.emit('notification', notification, room=f"company_{company_id}")
+    
+    print(f"Notification sent by {user_info['user_email']}: {notification['title']}")
+
+# Real-time activity tracking
+def broadcast_activity(company_id, team_id, activity_data):
+    """Broadcast activity to team members"""
+    if not team_id:
+        return
+        
+    team_room = f"team_{company_id}_{team_id}"
+    socketio.emit('activity_update', activity_data, room=team_room)
+    print(f"Activity broadcasted to team {team_id}: {activity_data.get('activity_type')}")
+
+def broadcast_standup_update(company_id, team_id, standup_data):
+    """Broadcast standup update to team members"""
+    if not team_id:
+        return
+        
+    team_room = f"team_{company_id}_{team_id}"
+    socketio.emit('standup_update', standup_data, room=team_room)
+    print(f"Standup update broadcasted to team {team_id}")
+
 # ===== BASIC ROUTES =====
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
+    firebase_status = 'connected' if db is not None else 'disconnected'
+    openai_status = 'configured' if os.getenv('OPENAI_API_KEY') else 'not configured'
+    
     return jsonify({
-        'status': 'healthy',
+        'status': 'healthy' if firebase_status == 'connected' else 'degraded',
         'timestamp': datetime.utcnow().isoformat(),
         'services': {
-            'firebase': 'connected',
-            'openai': 'configured'
+            'firebase': firebase_status,
+            'openai': openai_status,
+            'websocket': 'enabled'
         }
     })
 
@@ -580,6 +853,7 @@ def submit_standup():
         
         # Save to Firestore
         doc_ref = db.collection('standups').add(standup_data)
+        standup_id = doc_ref[1].id
         
         # Get today's standups for the team in current company
         today = datetime.utcnow().strftime('%Y-%m-%d')
@@ -600,9 +874,57 @@ def submit_standup():
         if len(standup_entries) > 1:
             team_summary = summarize_standups(standup_entries)
         
+        # Broadcast real-time standup update
+        standup_broadcast_data = {
+            'id': standup_id,
+            'user_id': request.user_id,
+            'user_email': request.user_email,
+            'team_id': team_id,
+            'yesterday': data.get('yesterday', ''),
+            'today': data.get('today', ''),
+            'blockers': data.get('blockers', ''),
+            'blocker_analysis': blocker_analysis,
+            'sentiment': sentiment_analysis,
+            'timestamp': datetime.utcnow().isoformat()
+        }
+        broadcast_standup_update(company_id, team_id, standup_broadcast_data)
+        
+        # Broadcast activity update
+        activity_data = {
+            'id': f"activity_{int(time.time() * 1000)}",
+            'activity_type': 'standup',
+            'user_name': request.user_email.split('@')[0],
+            'user_id': request.user_id,
+            'details': {
+                'action': 'submitted',
+                'blocker': data.get('blockers', '') if data.get('blockers', '') else None
+            },
+            'timestamp': datetime.utcnow().isoformat()
+        }
+        broadcast_activity(company_id, team_id, activity_data)
+        
+        # Send notification for blockers
+        if blocker_analysis.get('has_blockers'):
+            notification_data = {
+                'type': 'warning',
+                'title': 'Blocker Detected',
+                'message': f"{request.user_email.split('@')[0]} reported blockers in their standup",
+                'team_id': team_id
+            }
+            team_room = f"team_{company_id}_{team_id}"
+            socketio.emit('notification', {
+                'id': f"notif_{int(time.time() * 1000)}",
+                'type': notification_data['type'],
+                'title': notification_data['title'],
+                'message': notification_data['message'],
+                'sender': 'System',
+                'timestamp': datetime.utcnow().isoformat(),
+                'team_id': team_id
+            }, room=team_room)
+        
         return jsonify({
             'success': True,
-            'standup_id': doc_ref[1].id,
+            'standup_id': standup_id,
             'blocker_analysis': blocker_analysis,
             'sentiment': sentiment_analysis,
             'team_summary': team_summary,
@@ -806,4 +1128,18 @@ def create_retrospective():
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    # Get configuration from environment
+    debug_mode = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
+    port = int(os.getenv('PORT', 5000))
+    host = os.getenv('HOST', '0.0.0.0')
+    
+    print(f"Starting Upstand server on {host}:{port}")
+    print(f"Debug mode: {debug_mode}")
+    print(f"Allowed origins: {allowed_origins}")
+    
+    # Use SocketIO run instead of Flask run for WebSocket support
+    socketio.run(app, 
+                debug=debug_mode, 
+                port=port, 
+                host=host, 
+                allow_unsafe_werkzeug=debug_mode)

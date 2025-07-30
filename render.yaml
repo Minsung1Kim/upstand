@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: upstand-backend
+    env: python
+    buildCommand: "cd server && pip install -r requirements.txt"
+    startCommand: "cd server && python app.py"
+    healthCheckPath: /api/health
+    envVars:
+      - key: FLASK_DEBUG
+        value: "False"
+      - key: HOST
+        value: "0.0.0.0"
+      - key: PORT
+        fromService:
+          type: web
+          name: upstand-backend
+          property: port
+      - key: SECRET_KEY
+        generateValue: true
+      - key: FIREBASE_SERVICE_ACCOUNT_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ALLOWED_ORIGINS
+        value: "https://your-frontend.vercel.app"
