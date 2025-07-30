@@ -1,0 +1,11 @@
+# Copy of server/requirements.txt for Railway auto-detection
+Flask==2.3.3
+Flask-CORS==4.0.0
+flask-socketio==5.3.6
+python-socketio==5.9.0
+firebase-admin==6.2.0
+python-dotenv==1.0.0
+openai==0.28.1
+google-cloud-firestore==2.11.1
+PyJWT==2.8.0
+requests==2.31.0
