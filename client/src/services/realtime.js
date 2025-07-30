@@ -52,8 +52,6 @@ class RealTimeService {
                      'http://localhost:5000';
     
     console.log('🔗 WebSocket connecting to:', serverUrl);
-    console.log('REACT_APP_WEBSOCKET_URL:', process.env.REACT_APP_WEBSOCKET_URL);
-    console.log('REACT_APP_API_BASE_URL:', process.env.REACT_APP_API_BASE_URL);
     
     this.socket = io(serverUrl, {
       auth: {

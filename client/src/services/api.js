@@ -18,9 +18,6 @@ const api = axios.create({
 // Request interceptor to add auth token and company context
 api.interceptors.request.use(
   async (config) => {
-    console.log('🌐 API Request:', config.method?.toUpperCase(), config.url);
-    console.log('🔗 Full URL:', config.baseURL + config.url);
-    
     const user = auth.currentUser;
     if (user) {
       const token = await user.getIdToken();
@@ -42,14 +39,8 @@ api.interceptors.request.use(
 
 // Response interceptor for error handling
 api.interceptors.response.use(
-  (response) => {
-    console.log('✅ API Response:', response.status, response.config.url);
-    return response;
-  },
+  (response) => response,
   (error) => {
-    console.log('❌ API Error:', error.response?.status, error.config?.url);
-    console.log('Error details:', error.response?.data || error.message);
-    
     if (error.response?.status === 401) {
       // Handle unauthorized access
       auth.signOut();
