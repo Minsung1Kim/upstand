@@ -1,9 +1,8 @@
 {
-  "version": 2,
-  "name": "upstand-frontend",
   "buildCommand": "cd client && npm run build",
   "outputDirectory": "client/build",
   "installCommand": "cd client && npm install",
+  "framework": null,
   "routes": [
     {
       "src": "/(.*)",
