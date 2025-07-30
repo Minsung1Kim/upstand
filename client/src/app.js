@@ -1,6 +1,7 @@
 /**
  * Upstand - AI-Powered Agile Scrum Assistant
  * Main React Application Component
+ * Version: 1.0.1
  */
 
 import React from 'react';
