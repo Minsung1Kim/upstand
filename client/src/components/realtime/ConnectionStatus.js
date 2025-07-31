@@ -6,6 +6,11 @@ const ConnectionStatus = ({ position = 'bottom-left' }) => {
   const { isConnected, connectionStatus, teamOnlineCount } = useRealTime();
   const [showDetails, setShowDetails] = useState(false);
 
+  // Defensive: Don't render if context is missing
+  if (typeof isConnected === 'undefined' || typeof connectionStatus === 'undefined') {
+    return null;
+  }
+
   const getPositionClasses = () => {
     switch (position) {
       case 'top-left':

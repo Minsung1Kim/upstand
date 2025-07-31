@@ -33,7 +33,7 @@ export const RealTimeProvider = ({ children }) => {
   const [toastNotifications, setToastNotifications] = useState([]);
   const [typingUsers, setTypingUsers] = useState([]);
 
-  // Initialize real-time service when dependencies are ready
+  // Defensive: Only initialize if all context is present
   useEffect(() => {
     const initializeRealTime = async () => {
       if (currentUser && currentTeam && currentCompany) {
@@ -43,6 +43,9 @@ export const RealTimeProvider = ({ children }) => {
 
         // Request notification permission
         realTimeService.requestNotificationPermission();
+      } else {
+        setIsConnected(false);
+        console.log('RealTimeContext: currentUser, currentTeam, or currentCompany is null!');
       }
     };
 
