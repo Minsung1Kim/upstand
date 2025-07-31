@@ -39,25 +39,36 @@ class RealTimeService {
     this.currentCompany = company;
 
     // Initialize WebSocket connection
-    this.initializeWebSocket();
+    await this.initializeWebSocket();
     
     // Set up Firebase real-time listeners
     this.setupFirebaseListeners();
   }
 
   // WebSocket connection setup
-  initializeWebSocket() {
+  async initializeWebSocket() {
     const serverUrl = process.env.REACT_APP_WEBSOCKET_URL || 
                      process.env.REACT_APP_API_BASE_URL?.replace('/api', '') || 
                      'http://localhost:5000';
     
     console.log('🔗 WebSocket connecting to:', serverUrl);
     
+    // Get Firebase auth token
+    let token = null;
+    if (this.currentUser) {
+      try {
+        token = await this.currentUser.getIdToken();
+      } catch (error) {
+        console.error('Failed to get auth token:', error);
+      }
+    }
+    
     this.socket = io(serverUrl, {
       auth: {
+        token: token,
+        company_id: this.currentCompany?.id || 'default',
         userId: this.currentUser?.uid,
-        teamId: this.currentTeam?.id,
-        companyId: this.currentCompany?.id
+        teamId: this.currentTeam?.id
       },
       transports: ['websocket', 'polling']
     });
@@ -418,10 +429,10 @@ class RealTimeService {
   }
 
   // Update context when user changes team/company
-  updateContext(user, team, company) {
+  async updateContext(user, team, company) {
     if (this.currentCompany?.id !== company?.id || this.currentTeam?.id !== team?.id) {
       this.disconnect();
-      this.initialize(user, team, company);
+      await this.initialize(user, team, company);
     }
   }
 

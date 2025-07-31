@@ -35,14 +35,18 @@ export const RealTimeProvider = ({ children }) => {
 
   // Initialize real-time service when dependencies are ready
   useEffect(() => {
-    if (currentUser && currentTeam && currentCompany) {
-      console.log('🚀 Initializing real-time service...');
-      realTimeService.initialize(currentUser, currentTeam, currentCompany);
-      setIsConnected(true);
+    const initializeRealTime = async () => {
+      if (currentUser && currentTeam && currentCompany) {
+        console.log('🚀 Initializing real-time service...');
+        await realTimeService.initialize(currentUser, currentTeam, currentCompany);
+        setIsConnected(true);
 
-      // Request notification permission
-      realTimeService.requestNotificationPermission();
-    }
+        // Request notification permission
+        realTimeService.requestNotificationPermission();
+      }
+    };
+
+    initializeRealTime();
 
     return () => {
       if (realTimeService) {
@@ -54,9 +58,13 @@ export const RealTimeProvider = ({ children }) => {
 
   // Update service context when team/company changes
   useEffect(() => {
-    if (currentUser && currentTeam && currentCompany && isConnected) {
-      realTimeService.updateContext(currentUser, currentTeam, currentCompany);
-    }
+    const updateContext = async () => {
+      if (currentUser && currentTeam && currentCompany && isConnected) {
+        await realTimeService.updateContext(currentUser, currentTeam, currentCompany);
+      }
+    };
+
+    updateContext();
   }, [currentUser, currentTeam, currentCompany, isConnected]);
 
   // Set up real-time event listeners
