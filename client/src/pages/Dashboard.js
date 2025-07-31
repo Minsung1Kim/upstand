@@ -71,7 +71,7 @@ function Dashboard() {
       setLoading(true);
       setError(''); // Clear any previous errors
       
-      const response = await api.get(`/get-dashboard?team_id=${currentTeam.id}`);
+      const response = await api.get(`/dashboard?team_id=${currentTeam.id}`);
       console.log('Dashboard data received:', response.data);
       
       setDashboardData(response.data);
