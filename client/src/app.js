@@ -21,6 +21,7 @@ import StandupForm from './pages/StandupForm';
 import SprintPlanning from './pages/SprintPlanning';
 import Retrospective from './pages/Retrospective';
 import TeamSettings from './pages/TeamSettings';
+import SprintDashboard from './pages/SprintDashboard'; // <-- Import SprintDashboard
 
 // Company Components
 import CompanySelector from './components/CompanySelector';
@@ -44,29 +45,29 @@ function App() {
                 <ConnectionStatus />
                 
                 <Routes>
-                <Route path="/login" element={<Login />} />
-                <Route path="/register" element={<Register />} />
-                
-                {/* Protected Routes */}
-                <Route element={<PrivateRoute />}>
-                  {/* Company Selection - No Navbar */}
-                  <Route path="/company/select" element={<CompanySelector />} />
-                  <Route path="/company/join" element={<JoinCompany />} />
-                  <Route path="/company/create" element={<AdminCompanyCreator />} />
+                  <Route path="/login" element={<Login />} />
+                  <Route path="/register" element={<Register />} />
                   
-                  {/* Main App with Navbar */}
-                  <Route element={<WithNavbar />}>
-                    <Route path="/dashboard" element={<Dashboard />} />
-                    <Route path="/standup" element={<StandupForm />} />
-                    <Route path="/sprint-planning" element={<SprintPlanning />} />
-                    <Route path="/retrospective" element={<Retrospective />} />
-                    <Route path="/team-settings" element={<TeamSettings />} />
-                    {/* Add redirect from /teams to /team-settings */}
-                    <Route path="/teams" element={<Navigate to="/team-settings" replace />} />
+                  {/* Protected Routes */}
+                  <Route element={<PrivateRoute />}>
+                    {/* Company Selection - No Navbar */}
+                    <Route path="/company/select" element={<CompanySelector />} />
+                    <Route path="/company/join" element={<JoinCompany />} />
+                    <Route path="/company/create" element={<AdminCompanyCreator />} />
+                    
+                    {/* Main App with Navbar */}
+                    <Route element={<WithNavbar />}>
+                      <Route path="/dashboard" element={<Dashboard />} />
+                      <Route path="/standup" element={<StandupForm />} />
+                      <Route path="/sprint-planning" element={<SprintPlanning />} />
+                      <Route path="/retrospective" element={<Retrospective />} />
+                      <Route path="/team-settings" element={<TeamSettings />} />
+                      <Route path="/sprints" element={<SprintDashboard />} /> {/* <-- Add Sprints route */}
+                      <Route path="/teams" element={<Navigate to="/team-settings" replace />} />
+                    </Route>
                   </Route>
-                </Route>
-                
-                <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                  
+                  <Route path="/" element={<Navigate to="/dashboard" replace />} />
                 </Routes>
               </div>
             </Router>

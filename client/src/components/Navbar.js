@@ -67,7 +67,7 @@ function Navbar() {
                     onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}>
                 Standup
               </Link>
-              <Link to="/sprint-planning" 
+              <Link to="/sprints" 
                     className="px-3 py-2 rounded-md hover:bg-opacity-20 transition-all duration-200 font-medium"
                     style={{color: colors.sprint.planning}}
                     onMouseEnter={(e) => e.target.style.backgroundColor = colors.sprint.planning + '20'}
