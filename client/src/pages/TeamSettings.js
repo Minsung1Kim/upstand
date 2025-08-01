@@ -205,7 +205,7 @@ function TeamSettings() {
         const updatedTeams = localTeams.filter(team => team.id !== teamId);
         saveLocalTeams(updatedTeams);
         
-        // Update teams state
+        // Update teams context
         if (refreshTeams && typeof refreshTeams === 'function') {
           await refreshTeams();
         }
@@ -215,9 +215,14 @@ function TeamSettings() {
           setCurrentTeam(null);
         }
         
-        alert(`You have left "${teamName}". You can rejoin later if needed.`);
+        // Close dropdown and refresh UI
         setShowDropdown(null);
         await fetchAvailableTeams();
+        
+        alert(`You have left "${teamName}". You can rejoin later if needed.`);
+        
+        // Force page refresh to show updated teams
+        window.location.reload();
       } catch (error) {
         alert('Failed to leave team: ' + error.message);
       }
@@ -254,7 +259,7 @@ function TeamSettings() {
     setShowDropdown(null);
   };
 
-  const handleChangeRole = (newRole) => {
+  const handleChangeRole = async (newRole) => {
     try {
       const localTeams = getLocalTeams();
       const updatedTeams = localTeams.map(team => 
@@ -264,12 +269,19 @@ function TeamSettings() {
       );
       saveLocalTeams(updatedTeams);
       
+      // Force refresh of teams context
       if (refreshTeams && typeof refreshTeams === 'function') {
-        refreshTeams();
+        await refreshTeams();
       }
+      
+      // Force re-fetch of available teams to update UI
+      await fetchAvailableTeams();
       
       alert(`Your role in "${showRoleModal.teamName}" has been updated to ${ROLES[newRole].name}`);
       setShowRoleModal(null);
+      
+      // Force component re-render by updating local state
+      window.location.reload();
     } catch (error) {
       alert('Failed to update role: ' + error.message);
     }
@@ -286,7 +298,7 @@ function TeamSettings() {
           const updatedTeams = localTeams.filter(team => team.id !== teamId);
           saveLocalTeams(updatedTeams);
           
-          // Update teams state if available
+          // Update teams context
           if (refreshTeams && typeof refreshTeams === 'function') {
             await refreshTeams();
           }
@@ -296,9 +308,14 @@ function TeamSettings() {
             setCurrentTeam(null);
           }
           
-          alert(`Team "${teamName}" has been permanently deleted.`);
+          // Close dropdown and refresh UI
           setShowDropdown(null);
           await fetchAvailableTeams();
+          
+          alert(`Team "${teamName}" has been permanently deleted.`);
+          
+          // Force page refresh to show updated teams
+          window.location.reload();
         } catch (error) {
           alert('Failed to delete team: ' + error.message);
         }
@@ -414,13 +431,6 @@ function TeamSettings() {
                                 >
                                   <CogIcon className="w-4 h-4 mr-2" />
                                   Change My Role
-                                </button>
-                                <button
-                                  onClick={() => handlePromoteUser(team.id, team.name)}
-                                  className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 w-full text-left"
-                                >
-                                  <UserPlusIcon className="w-4 h-4 mr-2" />
-                                  Manage Team
                                 </button>
                                 <div className="border-t border-gray-100"></div>
                                 <button
