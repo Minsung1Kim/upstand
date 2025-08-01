@@ -5,6 +5,9 @@ import { TeamProvider } from './context/TeamContext';
 import { CompanyProvider } from './context/CompanyContext';
 import { useAuth } from './context/AuthContext';
 import webSocketService from './services/websocket';
+import SprintManagement from './pages/SprintManagement';
+import SprintManagement from './pages/SprintManagement';
+
 
 // Import your components
 import Login from './pages/Login';
@@ -88,6 +91,7 @@ function AppContent() {
           <Route path="/teams" element={<TeamSettings />} />
           <Route path="/standup" element={<StandupForm />} />
           <Route path="/sprint-planning" element={<SprintPlanning />} />
+          <Route path="/sprint-management" element={<SprintManagement />} />
           <Route path="/retrospectives" element={<Retrospective />} />
         </Route>
         
