@@ -19,8 +19,10 @@ function SprintPlanning() {
 
     setLoading(true);
     try {
-      await api.post('/create-sprint', {
-        ...formData,
+      await api.post('/sprints', {
+        name: formData.name,
+        startDate: formData.startDate,
+        endDate: formData.endDate,
         team_id: currentTeam.id,
         goals: formData.goals.filter(g => g.trim())
       });
@@ -28,7 +30,8 @@ function SprintPlanning() {
       // Reset form
       setFormData({ name: '', startDate: '', endDate: '', goals: [''] });
     } catch (error) {
-      alert('Failed to create sprint');
+      console.error('Sprint creation error:', error);
+      alert('Failed to create sprint: ' + (error.response?.data?.error || error.message));
     } finally {
       setLoading(false);
     }
@@ -71,35 +74,33 @@ function SprintPlanning() {
               A <strong>sprint</strong> is a short, time-boxed period (typically 1-4 weeks) where your team focuses on completing a specific set of work. 
               It's the core building block of Agile development that helps teams deliver value incrementally and adapt quickly to changes.
             </p>
-            
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
               <div className="flex items-start space-x-2">
                 <ClockIcon className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
                 <div>
-                  <h3 className="font-medium text-blue-900">Time-Boxed</h3>
-                  <p className="text-sm text-blue-700">Fixed duration with clear start and end dates</p>
+                  <h3 className="font-medium text-blue-900">Time-boxed</h3>
+                  <p className="text-sm text-blue-700">Fixed duration creates urgency and focus</p>
                 </div>
               </div>
-              
               <div className="flex items-start space-x-2">
                 <FlagIcon className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
                 <div>
-                  <h3 className="font-medium text-blue-900">Goal-Oriented</h3>
-                  <p className="text-sm text-blue-700">Focused on achieving specific objectives</p>
+                  <h3 className="font-medium text-blue-900">Goal-oriented</h3>
+                  <p className="text-sm text-blue-700">Clear objectives drive team alignment</p>
                 </div>
               </div>
-              
               <div className="flex items-start space-x-2">
                 <CalendarIcon className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
                 <div>
                   <h3 className="font-medium text-blue-900">Iterative</h3>
-                  <p className="text-sm text-blue-700">Builds on previous work and learning</p>
+                  <p className="text-sm text-blue-700">Regular cycles enable continuous improvement</p>
                 </div>
               </div>
             </div>
           </div>
         </div>
 
+        {/* Sprint Creation Form */}
         <form onSubmit={handleSubmit} className="space-y-6">
           {/* Sprint Name */}
           <div>
