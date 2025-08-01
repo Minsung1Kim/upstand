@@ -9,7 +9,7 @@ import webSocketService from './services/websocket';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
-import Teams from './pages/Teams';
+import TeamSettings from './pages/TeamSettings';  // Fixed import name
 import StandupForm from './pages/StandupForm';
 import SprintPlanning from './pages/SprintPlanning';
 import Retrospectives from './pages/Retrospectives';
@@ -95,7 +95,7 @@ function AppContent() {
         
         <Route path="/teams" element={
           <ProtectedRoute>
-            <Teams />
+            <TeamSettings />
           </ProtectedRoute>
         } />
         
