@@ -251,29 +251,35 @@ function TeamSettings() {
 
   const handleChangeRole = async (newRole) => {
     try {
-      const localTeams = getLocalTeams();
-      const updatedTeams = localTeams.map(team => 
-        team.id === showRoleModal.teamId 
-          ? { ...team, role: newRole }
-          : team
-      );
-      saveLocalTeams(updatedTeams);
+      // Make API call to update role in database
+      const response = await api.put(`/teams/${showRoleModal.teamId}/role`, {
+        role: newRole
+      });
       
-      // Force refresh of teams context
-      if (refreshTeams && typeof refreshTeams === 'function') {
-        await refreshTeams();
+      if (response.data.success) {
+        // Update localStorage
+        const localTeams = getLocalTeams();
+        const updatedTeams = localTeams.map(team => 
+          team.id === showRoleModal.teamId 
+            ? { ...team, role: newRole }
+            : team
+        );
+        saveLocalTeams(updatedTeams);
+        
+        // Refresh teams context
+        if (refreshTeams && typeof refreshTeams === 'function') {
+          await refreshTeams();
+        }
+        
+        alert(`Your role in "${showRoleModal.teamName}" has been updated to ${ROLES[newRole].name}`);
+        setShowRoleModal(null);
+        window.location.reload();
+      } else {
+        throw new Error(response.data.error || 'Failed to update role');
       }
-      
-      // Force re-fetch of available teams to update UI
-      await fetchAvailableTeams();
-      
-      alert(`Your role in "${showRoleModal.teamName}" has been updated to ${ROLES[newRole].name}`);
-      setShowRoleModal(null);
-      
-      // Force component re-render by updating local state
-      window.location.reload();
     } catch (error) {
-      alert('Failed to update role: ' + error.message);
+      console.error('Role update error:', error);
+      alert('Failed to update role: ' + (error.response?.data?.error || error.message));
     }
   };
 
