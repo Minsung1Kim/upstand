@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { useTeam } from '../context/TeamContext';
+import api from '../services/api';
 import { 
   PlayIcon, 
   PauseIcon, 
@@ -16,12 +18,14 @@ import {
 } from '@heroicons/react/24/outline';
 
 const SprintManagement = () => {
+  const { currentTeam } = useTeam();
   const [sprints, setSprints] = useState([]);
   const [selectedSprint, setSelectedSprint] = useState(null);
   const [newComment, setNewComment] = useState('');
   const [showAddTask, setShowAddTask] = useState(false);
   const [showCreateSprint, setShowCreateSprint] = useState(false);
   const [showReassignModal, setShowReassignModal] = useState(null);
+  const [loading, setLoading] = useState(false);
   const [newTask, setNewTask] = useState({ title: '', assignee: 'Unassigned', estimate: 1 });
   const [newSprint, setNewSprint] = useState({
     name: '',
@@ -32,31 +36,82 @@ const SprintManagement = () => {
 
   const teamMembers = ['Unassigned', 'Minsung Kim', 'John Doe', 'Jane Smith'];
 
-  // Create new sprint
-  const createSprint = () => {
-    if (!newSprint.name.trim()) return;
-    
-    const sprint = {
-      id: Date.now(),
-      name: newSprint.name,
-      status: 'planning',
-      startDate: newSprint.startDate,
-      endDate: newSprint.endDate,
-      progress: 0,
-      goals: newSprint.goals.filter(g => g.trim()),
-      tasks: [],
-      comments: [{
-        id: Date.now(),
-        author: 'System',
-        text: 'Sprint created',
-        time: 'just now'
-      }]
-    };
+  // Load sprints from API when component mounts or team changes
+  useEffect(() => {
+    if (currentTeam) {
+      fetchSprints();
+    }
+  }, [currentTeam]);
 
-    setSprints([sprint, ...sprints]);
-    setSelectedSprint(sprint);
-    setNewSprint({ name: '', startDate: '', endDate: '', goals: [''] });
-    setShowCreateSprint(false);
+  // Fetch sprints from API
+  const fetchSprints = async () => {
+    if (!currentTeam) return;
+    
+    setLoading(true);
+    try {
+      const response = await api.get(`/sprints?team_id=${currentTeam.id}`);
+      const apiSprints = response.data.sprints || [];
+      
+      // Convert API sprints to local format
+      const formattedSprints = apiSprints.map(sprint => ({
+        id: sprint.id,
+        name: sprint.name,
+        status: sprint.status || 'planning',
+        startDate: sprint.start_date,
+        endDate: sprint.end_date,
+        progress: 0, // Calculate this based on tasks
+        goals: sprint.goals || [],
+        tasks: [], // Tasks would need separate API call
+        comments: [{
+          id: Date.now(),
+          author: 'System',
+          text: 'Sprint loaded from database',
+          time: 'just now'
+        }]
+      }));
+      
+      setSprints(formattedSprints);
+      
+      // Auto-select first sprint if available
+      if (formattedSprints.length > 0 && !selectedSprint) {
+        setSelectedSprint(formattedSprints[0]);
+      }
+    } catch (error) {
+      console.error('Failed to fetch sprints:', error);
+      setSprints([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Create new sprint
+  const createSprint = async () => {
+    if (!newSprint.name.trim() || !currentTeam) return;
+    
+    setLoading(true);
+    try {
+      const response = await api.post('/sprints', {
+        name: newSprint.name,
+        startDate: newSprint.startDate,
+        endDate: newSprint.endDate,
+        team_id: currentTeam.id,
+        goals: newSprint.goals.filter(g => g.trim())
+      });
+      
+      if (response.data.success) {
+        // Refresh sprints from API
+        await fetchSprints();
+        
+        setNewSprint({ name: '', startDate: '', endDate: '', goals: [''] });
+        setShowCreateSprint(false);
+        alert('Sprint created successfully!');
+      }
+    } catch (error) {
+      console.error('Failed to create sprint:', error);
+      alert('Failed to create sprint: ' + (error.response?.data?.error || error.message));
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Calculate team workload
