@@ -31,7 +31,13 @@ export function TeamProvider({ children }) {
       setLoading(true);
       const response = await api.get('/teams');
       setTeams(response.data.teams);
-      setCurrentTeam(null); // No auto-select
+
+      // Auto-select first team if available
+      if (response.data.teams.length > 0) {
+        setCurrentTeam(response.data.teams[0]);
+      } else {
+        setCurrentTeam(null);
+      }
     } catch (error) {
       console.error('Error fetching teams from API:', error);
       setTeams([]);
@@ -48,6 +54,11 @@ export function TeamProvider({ children }) {
         company_id: currentCompany?.id || 'default'
       };
       const response = await api.post('/teams', teamPayload);
+
+      // Set the newly created team as current
+      setCurrentTeam(response.data);
+
+      // Refresh teams list
       await fetchTeams();
       return response.data;
     } catch (error) {
