@@ -54,6 +54,10 @@ const ConnectionStatus = ({ position = 'bottom-left' }) => {
     );
   };
 
+  // Don't show in production unless there's an issue
+  if (process.env.NODE_ENV === 'production' && isConnected) {
+    return null;
+  }
 
   return (
     <div className={`fixed ${getPositionClasses()} z-40`}>
