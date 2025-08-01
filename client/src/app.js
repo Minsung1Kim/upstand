@@ -1,18 +1,18 @@
 import React, { useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { AuthProvider } from './contexts/AuthContext';
-import { TeamProvider } from './contexts/TeamContext';
-import { useAuth } from './contexts/AuthContext';
+import { AuthProvider } from './context/AuthContext';
+import { TeamProvider } from './context/TeamContext';
+import { useAuth } from './context/AuthContext';
 import webSocketService from './services/websocket';
 
 // Import your components
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
-import TeamSettings from './pages/TeamSettings';  // Fixed import name
+import TeamSettings from './pages/TeamSettings';  // Fixed: was Teams, now TeamSettings
 import StandupForm from './pages/StandupForm';
 import SprintPlanning from './pages/SprintPlanning';
-import Retrospectives from './pages/Retrospectives';
+import Retrospective from './pages/Retrospective';  // Fixed: was Retrospectives, now Retrospective (singular)
 import ProtectedRoute from './components/ProtectedRoute';
 
 // WebSocket Connection Component
@@ -113,7 +113,7 @@ function AppContent() {
         
         <Route path="/retrospectives" element={
           <ProtectedRoute>
-            <Retrospectives />
+            <Retrospective />
           </ProtectedRoute>
         } />
         
