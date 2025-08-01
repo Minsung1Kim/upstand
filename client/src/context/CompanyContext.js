@@ -7,8 +7,8 @@ export const useCompany = () => useContext(CompanyContext);
 
 export const CompanyProvider = ({ children }) => {
   const { currentUser } = useAuth();
-  const [userCompanies, setUserCompanies] = useState([]); // All companies user belongs to
-  const [currentCompany, setCurrentCompany] = useState(null); // Currently selected company
+  const [userCompanies, setUserCompanies] = useState([]);
+  const [currentCompany, setCurrentCompany] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -23,18 +23,15 @@ export const CompanyProvider = ({ children }) => {
 
   const loadUserCompanies = async () => {
     try {
-      // Get companies from localStorage (later: from backend)
       const userCompaniesKey = `user_companies_${currentUser.uid}`;
       const stored = localStorage.getItem(userCompaniesKey);
       const companies = stored ? JSON.parse(stored) : [];
-      
       setUserCompanies(companies);
-      
+
       // Set current company (last used or first available)
       const lastUsedKey = `last_company_${currentUser.uid}`;
       const lastUsed = localStorage.getItem(lastUsedKey);
       const defaultCompany = companies.find(c => c.id === lastUsed) || companies[0];
-      
       setCurrentCompany(defaultCompany || null);
     } catch (error) {
       console.error('Error loading companies:', error);
@@ -47,30 +44,21 @@ export const CompanyProvider = ({ children }) => {
 
   const switchCompany = (company) => {
     setCurrentCompany(company);
-    // Remember last used company
     localStorage.setItem(`last_company_${currentUser.uid}`, company.id);
   };
 
   const joinCompany = async (companyCode) => {
     try {
-      // For now, create company object from code
       const newCompany = {
         id: companyCode.toUpperCase(),
         name: companyCode.toUpperCase(),
         code: companyCode.toUpperCase(),
         role: 'MEMBER'
       };
-
       const updatedCompanies = [...userCompanies, newCompany];
       setUserCompanies(updatedCompanies);
-      
-      // Save to localStorage
-      const userCompaniesKey = `user_companies_${currentUser.uid}`;
-      localStorage.setItem(userCompaniesKey, JSON.stringify(updatedCompanies));
-      
-      // Switch to new company
+      localStorage.setItem(`user_companies_${currentUser.uid}`, JSON.stringify(updatedCompanies));
       switchCompany(newCompany);
-      
       return newCompany;
     } catch (error) {
       throw new Error('Failed to join company');
@@ -80,24 +68,16 @@ export const CompanyProvider = ({ children }) => {
   const createCompany = async (companyName) => {
     try {
       const companyCode = companyName.toUpperCase().replace(/\s+/g, '') + Math.floor(Math.random() * 1000);
-      
       const newCompany = {
         id: companyCode,
         name: companyName,
         code: companyCode,
         role: 'OWNER'
       };
-
       const updatedCompanies = [...userCompanies, newCompany];
       setUserCompanies(updatedCompanies);
-      
-      // Save to localStorage
-      const userCompaniesKey = `user_companies_${currentUser.uid}`;
-      localStorage.setItem(userCompaniesKey, JSON.stringify(updatedCompanies));
-      
-      // Switch to new company
+      localStorage.setItem(`user_companies_${currentUser.uid}`, JSON.stringify(updatedCompanies));
       switchCompany(newCompany);
-      
       return newCompany;
     } catch (error) {
       throw new Error('Failed to create company');
