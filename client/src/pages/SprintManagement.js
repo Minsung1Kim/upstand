@@ -52,21 +52,23 @@ const SprintManagement = () => {
       const response = await api.get(`/sprints?team_id=${currentTeam.id}`);
       const apiSprints = response.data.sprints || [];
       
-      // Convert API sprints to local format with saved tasks/comments
-      const formattedSprints = apiSprints.map(sprint => {
-        const savedData = getSavedSprintData(sprint.id);
-        return {
-          id: sprint.id,
-          name: sprint.name,
-          status: sprint.status || 'planning',
-          startDate: sprint.start_date,
-          endDate: sprint.end_date,
-          progress: calculateProgress(savedData.tasks),
-          goals: sprint.goals || [],
-          tasks: savedData.tasks,
-          comments: savedData.comments
-        };
-      });
+      // Convert API sprints to local format
+      const formattedSprints = apiSprints.map(sprint => ({
+        id: sprint.id,
+        name: sprint.name,
+        status: sprint.status || 'planning',
+        startDate: sprint.start_date,
+        endDate: sprint.end_date,
+        progress: 0, // Calculate this based on tasks
+        goals: sprint.goals || [],
+        tasks: [], // Tasks would need separate API call
+        comments: [{
+          id: Date.now(),
+          author: 'System',
+          text: 'Sprint loaded from database',
+          time: 'just now'
+        }]
+      }));
       
       setSprints(formattedSprints);
       
@@ -80,44 +82,6 @@ const SprintManagement = () => {
     } finally {
       setLoading(false);
     }
-  };
-
-  // Get saved sprint data from localStorage
-  const getSavedSprintData = (sprintId) => {
-    try {
-      const saved = localStorage.getItem(`sprint_${sprintId}_data`);
-      if (saved) {
-        const data = JSON.parse(saved);
-        return {
-          tasks: data.tasks || [],
-          comments: data.comments || []
-        };
-      }
-    } catch (error) {
-      console.error('Error loading sprint data:', error);
-    }
-    
-    return {
-      tasks: [],
-      comments: []
-    };
-  };
-
-  // Save sprint data to localStorage
-  const saveSprintData = (sprintId, tasks, comments) => {
-    try {
-      const data = { tasks, comments };
-      localStorage.setItem(`sprint_${sprintId}_data`, JSON.stringify(data));
-    } catch (error) {
-      console.error('Error saving sprint data:', error);
-    }
-  };
-
-  // Calculate progress based on completed tasks
-  const calculateProgress = (tasks) => {
-    if (!tasks || tasks.length === 0) return 0;
-    const completed = tasks.filter(task => task.status === 'completed').length;
-    return Math.round((completed / tasks.length) * 100);
   };
 
   // Create new sprint
@@ -182,20 +146,14 @@ const SprintManagement = () => {
       time: 'just now'
     };
 
-    const updatedComments = [comment, ...selectedSprint.comments];
-    const updatedSprint = { ...selectedSprint, comments: updatedComments };
-    
-    // Update local state
     const updatedSprints = sprints.map(sprint => 
-      sprint.id === selectedSprint.id ? updatedSprint : sprint
+      sprint.id === selectedSprint.id 
+        ? { ...sprint, comments: [comment, ...sprint.comments] }
+        : sprint
     );
 
     setSprints(updatedSprints);
-    setSelectedSprint(updatedSprint);
-    
-    // Save to localStorage
-    saveSprintData(selectedSprint.id, selectedSprint.tasks, updatedComments);
-    
+    setSelectedSprint(prev => ({ ...prev, comments: [comment, ...prev.comments] }));
     setNewComment('');
   };
 
@@ -211,63 +169,46 @@ const SprintManagement = () => {
       estimate: parseInt(newTask.estimate)
     };
 
-    const updatedTasks = [...selectedSprint.tasks, task];
-    const updatedProgress = calculateProgress(updatedTasks);
-    const updatedSprint = { ...selectedSprint, tasks: updatedTasks, progress: updatedProgress };
-
-    // Update local state
     const updatedSprints = sprints.map(sprint =>
-      sprint.id === selectedSprint.id ? updatedSprint : sprint
+      sprint.id === selectedSprint.id
+        ? { ...sprint, tasks: [...sprint.tasks, task] }
+        : sprint
     );
 
     setSprints(updatedSprints);
-    setSelectedSprint(updatedSprint);
-    
-    // Save to localStorage
-    saveSprintData(selectedSprint.id, updatedTasks, selectedSprint.comments);
-    
+    setSelectedSprint(prev => ({ ...prev, tasks: [...prev.tasks, task] }));
     setNewTask({ title: '', assignee: 'Unassigned', estimate: 1 });
     setShowAddTask(false);
   };
 
   // Update task status
   const updateTaskStatus = (taskId, newStatus) => {
-    const updatedTasks = selectedSprint.tasks.map(task => 
-      task.id === taskId ? { ...task, status: newStatus } : task
-    );
-    const updatedProgress = calculateProgress(updatedTasks);
-    const updatedSprint = { ...selectedSprint, tasks: updatedTasks, progress: updatedProgress };
+    const updateTasks = (tasks) => 
+      tasks.map(task => task.id === taskId ? { ...task, status: newStatus } : task);
 
-    // Update local state
     const updatedSprints = sprints.map(sprint =>
-      sprint.id === selectedSprint.id ? updatedSprint : sprint
+      sprint.id === selectedSprint.id
+        ? { ...sprint, tasks: updateTasks(sprint.tasks) }
+        : sprint
     );
 
     setSprints(updatedSprints);
-    setSelectedSprint(updatedSprint);
-    
-    // Save to localStorage
-    saveSprintData(selectedSprint.id, updatedTasks, selectedSprint.comments);
+    setSelectedSprint(prev => ({ ...prev, tasks: updateTasks(prev.tasks) }));
   };
 
   // Reassign task
   const reassignTask = (taskId, newAssignee) => {
-    const updatedTasks = selectedSprint.tasks.map(task => 
-      task.id === taskId ? { ...task, assignee: newAssignee } : task
-    );
-    const updatedSprint = { ...selectedSprint, tasks: updatedTasks };
+    const updateTasks = (tasks) => 
+      tasks.map(task => task.id === taskId ? { ...task, assignee: newAssignee } : task);
 
-    // Update local state
     const updatedSprints = sprints.map(sprint =>
-      sprint.id === selectedSprint.id ? updatedSprint : sprint
+      sprint.id === selectedSprint.id
+        ? { ...sprint, tasks: updateTasks(sprint.tasks) }
+        : sprint
     );
 
     setSprints(updatedSprints);
-    setSelectedSprint(updatedSprint);
-    
-    // Save to localStorage
-    saveSprintData(selectedSprint.id, updatedTasks, selectedSprint.comments);
-    
+    setSelectedSprint(prev => ({ ...prev, tasks: updateTasks(prev.tasks) }));
     setShowReassignModal(null);
   };
 
@@ -332,7 +273,7 @@ const SprintManagement = () => {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Sprint Management</h1>
-            <p className="text-gray-600 mt-2">Create, manage, and track your agile sprints</p>
+            <p className="text-gray-600 mt-2">Manage your sprints, track progress, and coordinate team work</p>
           </div>
           <button 
             onClick={() => setShowCreateSprint(true)}
@@ -343,40 +284,6 @@ const SprintManagement = () => {
           </button>
         </div>
       </div>
-
-      {/* Sprint Explanation */}
-      {sprints.length === 0 && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-6">
-          <h2 className="text-lg font-semibold text-blue-900 mb-3">What is a Sprint?</h2>
-          <p className="text-blue-800 mb-4">
-            A <strong>sprint</strong> is a short, time-boxed period (typically 1-4 weeks) where your team focuses on completing a specific set of work. 
-            It's the core building block of Agile development that helps teams deliver value incrementally and adapt quickly to changes.
-          </p>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="flex items-start space-x-2">
-              <ClockIcon className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
-              <div>
-                <h3 className="font-medium text-blue-900">Time-boxed</h3>
-                <p className="text-sm text-blue-700">Fixed duration creates urgency and focus</p>
-              </div>
-            </div>
-            <div className="flex items-start space-x-2">
-              <FlagIcon className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
-              <div>
-                <h3 className="font-medium text-blue-900">Goal-oriented</h3>
-                <p className="text-sm text-blue-700">Clear objectives drive team alignment</p>
-              </div>
-            </div>
-            <div className="flex items-start space-x-2">
-              <CalendarIcon className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
-              <div>
-                <h3 className="font-medium text-blue-900">Iterative</h3>
-                <p className="text-sm text-blue-700">Regular cycles enable continuous improvement</p>
-              </div>
-            </div>
-          </div>
-        </div>
-  )}
 
       {/* Create Sprint Modal */}
       {showCreateSprint && (
