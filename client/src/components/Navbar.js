@@ -4,25 +4,19 @@ import { useAuth } from '../context/AuthContext';
 import { useTeam } from '../context/TeamContext';
 import { useCompany } from '../context/CompanyContext';
 import { colors } from '../utils/colors';
-import { ChevronDownIcon } from '@heroicons/react/24/outline';
 
 function Navbar() {
   const { logout, currentUser, getUserProfile } = useAuth();
   const { currentTeam } = useTeam();
   const { userCompanies, currentCompany, switchCompany } = useCompany();
   const [showCompanyDropdown, setShowCompanyDropdown] = useState(false);
-  const [showSprintsDropdown, setShowSprintsDropdown] = useState(false);
   const companyDropdownRef = useRef(null);
-  const sprintsDropdownRef = useRef(null);
   const navigate = useNavigate();
 
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (companyDropdownRef.current && !companyDropdownRef.current.contains(event.target)) {
         setShowCompanyDropdown(false);
-      }
-      if (sprintsDropdownRef.current && !sprintsDropdownRef.current.contains(event.target)) {
-        setShowSprintsDropdown(false);
       }
     };
 
@@ -74,50 +68,13 @@ function Navbar() {
                 Standup
               </Link>
               
-              {/* Sprints Dropdown */}
-              <div className="relative" ref={sprintsDropdownRef}>
-                <button
-                  onClick={() => setShowSprintsDropdown(!showSprintsDropdown)}
-                  className="flex items-center px-3 py-2 rounded-md hover:bg-opacity-20 transition-all duration-200 font-medium"
-                  style={{color: colors.sprint?.planning || colors.primary[100]}}
-                  onMouseEnter={(e) => e.target.style.backgroundColor = (colors.sprint?.planning || colors.primary[200]) + '20'}
-                  onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
-                >
-                  <span>Sprints</span>
-                  <ChevronDownIcon className={`w-4 h-4 ml-1 transition-transform ${showSprintsDropdown ? 'rotate-180' : ''}`} />
-                </button>
-
-                {/* Sprints Dropdown Menu */}
-                {showSprintsDropdown && (
-                  <div className="absolute top-full left-0 mt-2 w-48 bg-white rounded-lg shadow-xl border-2 z-50"
-                       style={{borderColor: colors.primary[200]}}>
-                    <div className="py-2">
-                      <Link
-                        to="/sprint-planning"
-                        onClick={() => setShowSprintsDropdown(false)}
-                        className="block px-4 py-3 text-sm transition-all duration-200"
-                        style={{color: colors.neutral[700]}}
-                        onMouseEnter={(e) => e.target.style.backgroundColor = colors.primary[50]}
-                        onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
-                      >
-                        <div className="font-medium">Create Sprint</div>
-                        <div className="text-xs text-gray-500">Plan and start new sprints</div>
-                      </Link>
-                      <Link
-                        to="/sprint-management"
-                        onClick={() => setShowSprintsDropdown(false)}
-                        className="block px-4 py-3 text-sm transition-all duration-200"
-                        style={{color: colors.neutral[700]}}
-                        onMouseEnter={(e) => e.target.style.backgroundColor = colors.primary[50]}
-                        onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
-                      >
-                        <div className="font-medium">Manage Sprints</div>
-                        <div className="text-xs text-gray-500">Track progress and assign tasks</div>
-                      </Link>
-                    </div>
-                  </div>
-                )}
-              </div>
+              <Link to="/sprint-management" 
+                    className="px-3 py-2 rounded-md hover:bg-opacity-20 transition-all duration-200 font-medium"
+                    style={{color: colors.sprint?.planning || colors.primary[100]}}
+                    onMouseEnter={(e) => e.target.style.backgroundColor = (colors.sprint?.planning || colors.primary[200]) + '20'}
+                    onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}>
+                Sprints
+              </Link>
 
               <Link to="/retrospectives" 
                     className="px-3 py-2 rounded-md hover:bg-opacity-20 transition-all duration-200 font-medium"
