@@ -414,6 +414,61 @@ def delete_team(team_id):
             'error': 'Failed to delete team'
         }), 500
 
+@app.route('/api/teams/<team_id>/role', methods=['PUT'])
+@require_auth
+def update_user_role(team_id):
+    """Update user's role in a team"""
+    try:
+        user_id = request.user_id
+        data = request.get_json()
+        new_role = data.get('role')
+        
+        if not new_role or new_role not in ['OWNER', 'MANAGER', 'DEVELOPER', 'VIEWER']:
+            return jsonify({
+                'success': False,
+                'error': 'Invalid role'
+            }), 400
+        
+        # Get team document
+        team_ref = db.collection('teams').document(team_id)
+        team_doc = team_ref.get()
+        
+        if not team_doc.exists:
+            return jsonify({
+                'success': False,
+                'error': 'Team not found'
+            }), 404
+        
+        team_data = team_doc.to_dict()
+        
+        # Check if user is a member
+        if user_id not in team_data.get('members', []):
+            return jsonify({
+                'success': False,
+                'error': 'You are not a member of this team'
+            }), 403
+        
+        # Update user's role
+        member_roles = team_data.get('member_roles', {})
+        member_roles[user_id] = new_role
+        
+        team_ref.update({
+            'member_roles': member_roles,
+            'updated_at': datetime.utcnow().isoformat()
+        })
+        
+        return jsonify({
+            'success': True,
+            'message': f'Role updated to {new_role}'
+        })
+        
+    except Exception as e:
+        print(f"Error updating role: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to update role'
+        }), 500
+
 @app.route('/api/teams/<team_id>/join', methods=['POST'])
 @require_auth
 def join_team(team_id):
