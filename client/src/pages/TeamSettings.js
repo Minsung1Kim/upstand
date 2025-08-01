@@ -144,31 +144,39 @@ function TeamSettings() {
   const handleLeaveTeam = async (teamId, teamName) => {
     if (window.confirm(`Are you sure you want to leave "${teamName}"? You'll lose access to team standups and data.`)) {
       try {
-        // Remove from local teams
-        const localTeams = getLocalTeams();
-        const updatedTeams = localTeams.filter(team => team.id !== teamId);
-        saveLocalTeams(updatedTeams);
+        // Make API call to leave team
+        const response = await api.post(`/teams/${teamId}/leave`);
         
-        // Update teams context
-        if (refreshTeams && typeof refreshTeams === 'function') {
-          await refreshTeams();
+        if (response.data.success) {
+          // Remove from local teams
+          const localTeams = getLocalTeams();
+          const updatedTeams = localTeams.filter(team => team.id !== teamId);
+          saveLocalTeams(updatedTeams);
+          
+          // Update teams context
+          if (refreshTeams && typeof refreshTeams === 'function') {
+            await refreshTeams();
+          }
+          
+          // If this was the current team, clear selection
+          if (currentTeam?.id === teamId) {
+            setCurrentTeam(null);
+          }
+          
+          // Close dropdown and refresh UI
+          setShowDropdown(null);
+          await fetchAvailableTeams();
+          
+          alert(`You have left "${teamName}". You can rejoin later if needed.`);
+          
+          // Force page refresh to show updated teams
+          window.location.reload();
+        } else {
+          throw new Error(response.data.error || 'Failed to leave team');
         }
-        
-        // If this was the current team, clear selection
-        if (currentTeam?.id === teamId) {
-          setCurrentTeam(null);
-        }
-        
-        // Close dropdown and refresh UI
-        setShowDropdown(null);
-        await fetchAvailableTeams();
-        
-        alert(`You have left "${teamName}". You can rejoin later if needed.`);
-        
-        // Force page refresh to show updated teams
-        window.location.reload();
       } catch (error) {
-        alert('Failed to leave team: ' + error.message);
+        console.error('Leave team error:', error);
+        alert('Failed to leave team: ' + (error.response?.data?.error || error.message));
       }
     }
   };
