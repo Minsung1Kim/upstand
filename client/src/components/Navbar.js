@@ -67,21 +67,21 @@ function Navbar() {
                     onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}>
                 Standup
               </Link>
-              <Link to="/sprints" 
+              <Link to="/sprint-planning" 
                     className="px-3 py-2 rounded-md hover:bg-opacity-20 transition-all duration-200 font-medium"
                     style={{color: colors.sprint.planning}}
                     onMouseEnter={(e) => e.target.style.backgroundColor = colors.sprint.planning + '20'}
                     onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}>
                 Sprints
               </Link>
-              <Link to="/retrospective" 
+              <Link to="/retrospectives" 
                     className="px-3 py-2 rounded-md hover:bg-opacity-20 transition-all duration-200 font-medium"
                     style={{color: colors.sprint.retrospective}}
                     onMouseEnter={(e) => e.target.style.backgroundColor = colors.sprint.retrospective + '20'}
                     onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}>
                 Retro
               </Link>
-              <Link to="/team-settings" 
+              <Link to="/teams" 
                     className="px-3 py-2 rounded-md hover:bg-opacity-20 transition-all duration-200 font-medium"
                     style={{color: colors.primary[100]}}
                     onMouseEnter={(e) => e.target.style.backgroundColor = colors.primary[200] + '20'}
@@ -172,29 +172,33 @@ function Navbar() {
                       <div className="border-t mt-2 pt-2" style={{borderColor: colors.neutral[200]}}>
                         <Link
                           to="/company/join"
-                          onClick={() => setShowCompanyDropdown(false)}
-                          className="w-full text-left px-4 py-2 text-sm flex items-center transition-all duration-200 rounded-md mx-2"
-                          style={{color: colors.secondary[500]}}
-                          onMouseEnter={(e) => e.target.style.backgroundColor = colors.secondary[50]}
+                          className="block px-4 py-2 text-sm transition-all duration-200"
+                          style={{color: colors.neutral[600]}}
+                          onMouseEnter={(e) => e.target.style.backgroundColor = colors.primary[50]}
                           onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
+                          onClick={() => setShowCompanyDropdown(false)}
                         >
-                          <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                          </svg>
-                          Join Company
+                          <div className="flex items-center">
+                            <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                            </svg>
+                            Join Company
+                          </div>
                         </Link>
                         <Link
                           to="/company/create"
-                          onClick={() => setShowCompanyDropdown(false)}
-                          className="w-full text-left px-4 py-2 text-sm flex items-center transition-all duration-200 rounded-md mx-2"
-                          style={{color: colors.accent.success}}
-                          onMouseEnter={(e) => e.target.style.backgroundColor = colors.accent.success + '10'}
+                          className="block px-4 py-2 text-sm transition-all duration-200"
+                          style={{color: colors.neutral[600]}}
+                          onMouseEnter={(e) => e.target.style.backgroundColor = colors.primary[50]}
                           onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
+                          onClick={() => setShowCompanyDropdown(false)}
                         >
-                          <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                          </svg>
-                          Create Company
+                          <div className="flex items-center">
+                            <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                            </svg>
+                            Create Company
+                          </div>
                         </Link>
                       </div>
                     </div>
