@@ -5,8 +5,7 @@ import { TeamProvider } from './context/TeamContext';
 import { CompanyProvider } from './context/CompanyContext';
 import { useAuth } from './context/AuthContext';
 import webSocketService from './services/websocket';
-import SprintManagement from './pages/SprintManagement';
-import SprintManagement from './pages/SprintManagement';
+
 
 
 // Import your components
@@ -18,6 +17,7 @@ import StandupForm from './pages/StandupForm';
 import SprintPlanning from './pages/SprintPlanning';
 import Retrospective from './pages/Retrospective';
 import PrivateRoute from './components/PrivateRoute';
+import SprintManagement from './pages/SprintManagement';
 
 // WebSocket Connection Component
 function WebSocketManager() {
