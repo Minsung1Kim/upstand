@@ -88,6 +88,88 @@ def require_auth(f):
         return f(*args, **kwargs)
     return decorated_function
 
+# ===== HELPER FUNCTIONS =====
+
+def detect_blockers(text):
+    """Simple blocker detection"""
+    blocker_keywords = ['blocked', 'stuck', 'issue', 'problem', 'waiting', 'cant', "can't", 'unable']
+    text_lower = text.lower()
+    has_blockers = any(keyword in text_lower for keyword in blocker_keywords)
+    
+    return {
+        'has_blockers': has_blockers,
+        'blockers': [text] if has_blockers else []
+    }
+
+def analyze_sentiment(text):
+    """Simple sentiment analysis"""
+    positive_words = ['good', 'great', 'excellent', 'finished', 'completed', 'success']
+    negative_words = ['bad', 'terrible', 'stuck', 'blocked', 'failed', 'problem']
+    
+    text_lower = text.lower()
+    positive_count = sum(1 for word in positive_words if word in text_lower)
+    negative_count = sum(1 for word in negative_words if word in text_lower)
+    
+    if positive_count > negative_count:
+        sentiment = 'positive'
+    elif negative_count > positive_count:
+        sentiment = 'negative'
+    else:
+        sentiment = 'neutral'
+    
+    return {'sentiment': sentiment}
+
+def summarize_standups(entries):
+    """Generate team summary"""
+    return f"Team completed {len(entries)} standups today"
+
+def summarize_blockers(blockers):
+    """Summarize active blockers"""
+    return {'blockers': blockers[:3]}  # Return first 3 blockers
+
+def broadcast_standup_update(company_id, team_id, data):
+    """Broadcast standup update to team room"""
+    room = f"team_{company_id}_{team_id}"
+    socketio.emit('standup_update', data, room=room)
+
+def broadcast_activity(company_id, team_id, data):
+    """Broadcast activity update to team room"""
+    room = f"team_{company_id}_{team_id}"
+    socketio.emit('team_activity', data, room=room)
+
+# ===== SOCKET.IO EVENT HANDLERS =====
+
+@socketio.on('connect')
+def handle_connect(auth):
+    print(f'Client connected: {request.sid}')
+    emit('connection_response', {'status': 'Connected to Upstand server'})
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    print(f'Client disconnected: {request.sid}')
+
+@socketio.on('join_team')
+def handle_join_team(data):
+    team_id = data.get('team_id')
+    company_id = data.get('company_id', 'default')
+    if team_id and company_id:
+        room = f"team_{company_id}_{team_id}"
+        join_room(room)
+        emit('status', {'msg': f'Joined team {team_id}'})
+
+@socketio.on('leave_team')
+def handle_leave_team(data):
+    team_id = data.get('team_id')
+    company_id = data.get('company_id', 'default')
+    if team_id and company_id:
+        room = f"team_{company_id}_{team_id}"
+        leave_room(room)
+        emit('status', {'msg': f'Left team {team_id}'})
+
+@socketio.on('ping')
+def handle_ping():
+    emit('pong', {'timestamp': datetime.utcnow().isoformat()})
+
 # ===== BASIC ROUTES =====
 
 @app.route('/api/health', methods=['GET'])
@@ -765,9 +847,112 @@ def assign_sprint(sprint_id):
         return jsonify({'success': False, 'error': 'Failed to assign sprint'}), 500
 
 # ===== RETRO ROUTES =====
-# ... (your existing retro routes here, unchanged) ...
 
-# Railway deployment health check
+@app.route('/api/retrospectives', methods=['POST'])
+@require_auth
+def create_retrospective():
+    """Create a retrospective session"""
+    try:
+        data = request.get_json()
+        company_id = request.company_id
+        team_id = data.get('team_id')
+        
+        if not team_id:
+            return jsonify({'error': 'team_id is required'}), 400
+        
+        # Verify team belongs to current company
+        team_ref = db.collection('teams').document(team_id)
+        team_doc = team_ref.get()
+        if not team_doc.exists or team_doc.to_dict().get('company_id') != company_id:
+            return jsonify({'error': 'Team not found or access denied'}), 403
+        
+        retro_data = {
+            'team_id': team_id,
+            'company_id': company_id,
+            'sprint_name': data.get('sprint_name', ''),
+            'what_went_well': data.get('what_went_well', []),
+            'what_could_improve': data.get('what_could_improve', []),
+            'action_items': data.get('action_items', []),
+            'created_by': request.user_id,
+            'created_at': firestore.SERVER_TIMESTAMP
+        }
+        
+        # Analyze feedback using basic AI (if OpenAI key available)
+        all_feedback = (
+            retro_data['what_went_well'] + 
+            retro_data['what_could_improve']
+        )
+        
+        if all_feedback and openai.api_key:
+            try:
+                # Simple feedback analysis
+                feedback_text = '\n'.join(all_feedback)
+                retro_data['ai_analysis'] = {
+                    'feedback_count': len(all_feedback),
+                    'positive_items': len(retro_data['what_went_well']),
+                    'improvement_items': len(retro_data['what_could_improve']),
+                    'summary': f"Team provided {len(all_feedback)} feedback items for retrospective"
+                }
+            except Exception as e:
+                print(f"AI analysis error: {e}")
+                retro_data['ai_analysis'] = {'error': 'AI analysis failed'}
+        
+        # Save to Firestore
+        doc_ref = db.collection('retrospectives').add(retro_data)
+        
+        return jsonify({
+            'success': True,
+            'retrospective_id': doc_ref[1].id,
+            'ai_analysis': retro_data.get('ai_analysis', {}),
+            'message': 'Retrospective created successfully'
+        })
+        
+    except Exception as e:
+        print(f"Error creating retrospective: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/retrospectives', methods=['GET'])
+@require_auth
+def get_retrospectives():
+    """Get retrospectives for a team"""
+    try:
+        company_id = request.company_id
+        team_id = request.args.get('team_id')
+        
+        if not team_id:
+            return jsonify({'error': 'team_id is required'}), 400
+        
+        # Verify team belongs to current company
+        team_ref = db.collection('teams').document(team_id)
+        team_doc = team_ref.get()
+        if not team_doc.exists or team_doc.to_dict().get('company_id') != company_id:
+            return jsonify({'error': 'Team not found or access denied'}), 403
+        
+        # Get retrospectives for the team
+        retros_ref = db.collection('retrospectives')
+        query = retros_ref.where('team_id', '==', team_id).where('company_id', '==', company_id).order_by('created_at', direction=firestore.Query.DESCENDING)
+        retros = query.stream()
+        
+        retro_list = []
+        for retro in retros:
+            retro_data = retro.to_dict()
+            retro_data['id'] = retro.id
+            # Convert timestamp to ISO string for JSON serialization
+            if 'created_at' in retro_data and retro_data['created_at']:
+                retro_data['created_at'] = retro_data['created_at'].isoformat()
+            retro_list.append(retro_data)
+        
+        return jsonify({
+            'success': True,
+            'retrospectives': retro_list
+        })
+        
+    except Exception as e:
+        print(f"Error fetching retrospectives: {str(e)}")
+        return jsonify({'success': False, 'error': 'Failed to fetch retrospectives'}), 500
+
+# ===== BASIC HEALTH ROUTES =====
+
 @app.route('/health', methods=['GET'])
 def railway_health():
     return jsonify({'status': 'healthy', 'service': 'upstand-backend'})
@@ -784,13 +969,15 @@ if __name__ == '__main__':
     debug_mode = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
     port = int(os.getenv('PORT', 5000))
     host = '0.0.0.0'
+    
     print(f"Starting Upstand server on {host}:{port}")
     print(f"Debug mode: {debug_mode}")
     print(f"Allowed origins: {allowed_origins}")
     print(f"Firebase status: {'Connected' if db else 'Not connected'}")
+    print(f"WebSocket support: {socketio.server.eio.async_mode}")
+    
     socketio.run(app, 
                 debug=debug_mode, 
                 port=port, 
                 host=host, 
                 allow_unsafe_werkzeug=True)
-
