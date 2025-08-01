@@ -4,19 +4,25 @@ import { useAuth } from '../context/AuthContext';
 import { useTeam } from '../context/TeamContext';
 import { useCompany } from '../context/CompanyContext';
 import { colors } from '../utils/colors';
+import { ChevronDownIcon } from '@heroicons/react/24/outline';
 
 function Navbar() {
   const { logout, currentUser, getUserProfile } = useAuth();
   const { currentTeam } = useTeam();
   const { userCompanies, currentCompany, switchCompany } = useCompany();
   const [showCompanyDropdown, setShowCompanyDropdown] = useState(false);
-  const dropdownRef = useRef(null);
+  const [showSprintsDropdown, setShowSprintsDropdown] = useState(false);
+  const companyDropdownRef = useRef(null);
+  const sprintsDropdownRef = useRef(null);
   const navigate = useNavigate();
 
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+      if (companyDropdownRef.current && !companyDropdownRef.current.contains(event.target)) {
         setShowCompanyDropdown(false);
+      }
+      if (sprintsDropdownRef.current && !sprintsDropdownRef.current.contains(event.target)) {
+        setShowSprintsDropdown(false);
       }
     };
 
@@ -67,17 +73,56 @@ function Navbar() {
                     onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}>
                 Standup
               </Link>
-              <Link to="/sprint-planning" 
-                    className="px-3 py-2 rounded-md hover:bg-opacity-20 transition-all duration-200 font-medium"
-                    style={{color: colors.sprint.planning}}
-                    onMouseEnter={(e) => e.target.style.backgroundColor = colors.sprint.planning + '20'}
-                    onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}>
-                Sprints
-              </Link>
+              
+              {/* Sprints Dropdown */}
+              <div className="relative" ref={sprintsDropdownRef}>
+                <button
+                  onClick={() => setShowSprintsDropdown(!showSprintsDropdown)}
+                  className="flex items-center px-3 py-2 rounded-md hover:bg-opacity-20 transition-all duration-200 font-medium"
+                  style={{color: colors.sprint?.planning || colors.primary[100]}}
+                  onMouseEnter={(e) => e.target.style.backgroundColor = (colors.sprint?.planning || colors.primary[200]) + '20'}
+                  onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
+                >
+                  <span>Sprints</span>
+                  <ChevronDownIcon className={`w-4 h-4 ml-1 transition-transform ${showSprintsDropdown ? 'rotate-180' : ''}`} />
+                </button>
+
+                {/* Sprints Dropdown Menu */}
+                {showSprintsDropdown && (
+                  <div className="absolute top-full left-0 mt-2 w-48 bg-white rounded-lg shadow-xl border-2 z-50"
+                       style={{borderColor: colors.primary[200]}}>
+                    <div className="py-2">
+                      <Link
+                        to="/sprint-planning"
+                        onClick={() => setShowSprintsDropdown(false)}
+                        className="block px-4 py-3 text-sm transition-all duration-200"
+                        style={{color: colors.neutral[700]}}
+                        onMouseEnter={(e) => e.target.style.backgroundColor = colors.primary[50]}
+                        onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
+                      >
+                        <div className="font-medium">Create Sprint</div>
+                        <div className="text-xs text-gray-500">Plan and start new sprints</div>
+                      </Link>
+                      <Link
+                        to="/sprint-management"
+                        onClick={() => setShowSprintsDropdown(false)}
+                        className="block px-4 py-3 text-sm transition-all duration-200"
+                        style={{color: colors.neutral[700]}}
+                        onMouseEnter={(e) => e.target.style.backgroundColor = colors.primary[50]}
+                        onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
+                      >
+                        <div className="font-medium">Manage Sprints</div>
+                        <div className="text-xs text-gray-500">Track progress and assign tasks</div>
+                      </Link>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <Link to="/retrospectives" 
                     className="px-3 py-2 rounded-md hover:bg-opacity-20 transition-all duration-200 font-medium"
-                    style={{color: colors.sprint.retrospective}}
-                    onMouseEnter={(e) => e.target.style.backgroundColor = colors.sprint.retrospective + '20'}
+                    style={{color: colors.sprint?.retrospective || colors.primary[100]}}
+                    onMouseEnter={(e) => e.target.style.backgroundColor = (colors.sprint?.retrospective || colors.primary[200]) + '20'}
                     onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}>
                 Retro
               </Link>
@@ -94,7 +139,7 @@ function Navbar() {
           <div className="flex items-center space-x-4">
             {/* Company Selector */}
             {currentCompany && (
-              <div className="relative" ref={dropdownRef}>
+              <div className="relative" ref={companyDropdownRef}>
                 <button
                   onClick={() => setShowCompanyDropdown(!showCompanyDropdown)}
                   className="flex items-center space-x-2 rounded-lg px-4 py-2 transition-all duration-200 border"
@@ -126,7 +171,7 @@ function Navbar() {
                   </svg>
                 </button>
 
-                {/* Dropdown Menu */}
+                {/* Company Dropdown Menu */}
                 {showCompanyDropdown && (
                   <div className="absolute top-full right-0 mt-2 w-64 bg-white rounded-lg shadow-xl border-2 z-50"
                        style={{borderColor: colors.primary[200]}}>
@@ -172,33 +217,13 @@ function Navbar() {
                       <div className="border-t mt-2 pt-2" style={{borderColor: colors.neutral[200]}}>
                         <Link
                           to="/company/join"
+                          onClick={() => setShowCompanyDropdown(false)}
                           className="block px-4 py-2 text-sm transition-all duration-200"
                           style={{color: colors.neutral[600]}}
                           onMouseEnter={(e) => e.target.style.backgroundColor = colors.primary[50]}
                           onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
-                          onClick={() => setShowCompanyDropdown(false)}
                         >
-                          <div className="flex items-center">
-                            <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                            </svg>
-                            Join Company
-                          </div>
-                        </Link>
-                        <Link
-                          to="/company/create"
-                          className="block px-4 py-2 text-sm transition-all duration-200"
-                          style={{color: colors.neutral[600]}}
-                          onMouseEnter={(e) => e.target.style.backgroundColor = colors.primary[50]}
-                          onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
-                          onClick={() => setShowCompanyDropdown(false)}
-                        >
-                          <div className="flex items-center">
-                            <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                            </svg>
-                            Create Company
-                          </div>
+                          Join Another Company
                         </Link>
                       </div>
                     </div>
@@ -207,22 +232,29 @@ function Navbar() {
               </div>
             )}
 
-            {/* Current Team Display */}
+            {/* Team Selector */}
             {currentTeam && (
-              <div className="hidden md:block px-3 py-2 rounded-lg border"
-                   style={{backgroundColor: colors.primary[50], borderColor: colors.primary[200]}}>
-                <span className="text-xs font-medium opacity-70" style={{color: colors.secondary[400]}}>Team:</span>
-                <span className="text-sm font-bold ml-1" style={{color: colors.secondary[500]}}>{currentTeam.name}</span>
+              <div 
+                className="text-sm font-medium px-3 py-2 rounded-lg"
+                style={{
+                  backgroundColor: colors.primary[200] + '40',
+                  color: colors.primary[200]
+                }}
+              >
+                <div className="text-xs opacity-70">Team: </div>
+                <div className="font-bold">{currentTeam.name}</div>
               </div>
             )}
-            
-            {/* Welcome Message */}
-            <div className="flex items-center space-x-4">
-              <div className="text-right hidden sm:block">
-                <div className="text-sm font-medium" style={{color: colors.primary[100]}}>Welcome, {displayName}</div>
-                {currentUser?.email && (
-                  <div className="text-xs opacity-70" style={{color: colors.primary[200]}}>{currentUser.email}</div>
-                )}
+
+            {/* User Info */}
+            <div className="flex items-center space-x-3">
+              <div className="text-right">
+                <div className="text-sm font-medium" style={{color: colors.primary[200]}}>
+                  Welcome, {displayName}
+                </div>
+                <div className="text-xs opacity-70" style={{color: colors.primary[100]}}>
+                  {currentUser?.email || 'user@example.com'}
+                </div>
               </div>
               
               {/* User Avatar */}
