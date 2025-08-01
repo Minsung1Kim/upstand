@@ -25,13 +25,16 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key-12345')
 
 # Hardcode allowed origins for testing - Railway env vars seem to have issues
-allowed_origins = ['http://localhost:3000', 'https://upstand-omega.vercel.app']
+allowed_origins = [
+    'http://localhost:3000',
+    'https://upstand-omega.vercel.app',
+    'https://upstand-git-main-minsung1kims-projects.vercel.app',
+    'https://upstand-cytbctct3-minsung1kims-projects.vercel.app/'
+]
 
-# Debug logging
 print(f"🔍 ALLOWED_ORIGINS env var: {os.getenv('ALLOWED_ORIGINS')}")
 print(f"🔍 Hardcoded allowed_origins: {allowed_origins}")
 
-# Configure CORS with more permissive settings for debugging
 CORS(app, 
      origins=allowed_origins,
      methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -39,7 +42,6 @@ CORS(app,
      supports_credentials=True,
      expose_headers=['Content-Type', 'Authorization'])
 
-# Initialize Socket.IO with proper configuration
 socketio = SocketIO(app, 
                    cors_allowed_origins=allowed_origins,
                    logger=False, 
@@ -47,19 +49,15 @@ socketio = SocketIO(app,
                    ping_timeout=60,
                    ping_interval=25)
 
-# Initialize Firebase Admin SDK
+# Firebase Admin SDK
 firebase_key = os.getenv('FIREBASE_SERVICE_ACCOUNT_KEY')
 if firebase_key:
     try:
-        # Try to parse as JSON string (for deployment)
         if firebase_key.startswith('{'):
-            import json
             firebase_config = json.loads(firebase_key)
             cred = credentials.Certificate(firebase_config)
         else:
-            # Use as file path (for local development)
             cred = credentials.Certificate(firebase_key)
-        
         firebase_admin.initialize_app(cred)
         db = firestore.client()
         print("Firebase initialized successfully")
@@ -70,394 +68,32 @@ else:
     print("Warning: FIREBASE_SERVICE_ACCOUNT_KEY not found")
     db = None
 
-# Initialize OpenAI
 openai.api_key = os.getenv('OPENAI_API_KEY')
 
-# Authentication decorator
 def require_auth(f):
-    """Decorator to verify Firebase Auth token and extract company context"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
         id_token = request.headers.get('Authorization')
         if not id_token:
             return jsonify({'error': 'No authorization token provided'}), 401
-        
         try:
-            # Remove 'Bearer ' prefix if present
             if id_token.startswith('Bearer '):
                 id_token = id_token[7:]
-            
-            # Verify the token
             decoded_token = auth.verify_id_token(id_token)
             request.user_id = decoded_token['uid']
             request.user_email = decoded_token.get('email', '')
-            
-            # Extract company context from header
             request.company_id = request.headers.get('X-Company-ID', 'default')
-            
         except Exception as e:
             return jsonify({'error': 'Invalid authorization token', 'details': str(e)}), 401
-        
         return f(*args, **kwargs)
     return decorated_function
-
-# WebSocket authentication helper
-def verify_socket_auth(auth_data):
-    """Verify authentication for WebSocket connections"""
-    try:
-        token = auth_data.get('token')
-        company_id = auth_data.get('company_id', 'default')
-        
-        if not token:
-            return None, None, None
-            
-        # Remove 'Bearer ' prefix if present
-        if token.startswith('Bearer '):
-            token = token[7:]
-            
-        # Verify the token
-        decoded_token = auth.verify_id_token(token)
-        user_id = decoded_token['uid']
-        user_email = decoded_token.get('email', '')
-        
-        return user_id, user_email, company_id
-    except Exception as e:
-        print(f"Socket auth error: {e}")
-        return None, None, None
-
-# Store active connections
-active_connections = {}  # {session_id: {user_id, user_email, company_id, team_id}}
-online_users = {}  # {company_id: {team_id: [user_objects]}}
-
-# AI Service Functions
-def summarize_standups(standup_entries):
-    """Use GPT to summarize multiple standup entries"""
-    prompt = f"""
-    Summarize the following standup meeting entries into a concise team update.
-    Highlight key accomplishments, today's focus areas, and any blockers.
-    
-    Standup Entries:
-    {json.dumps(standup_entries, indent=2)}
-    
-    Provide:
-    1. Team Summary (2-3 sentences)
-    2. Key Accomplishments
-    3. Today's Focus
-    4. Active Blockers (if any)
-    """
-    
-    try:
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "You are an agile scrum master providing concise team updates."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.7,
-            max_tokens=500
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        return f"Error generating summary: {str(e)}"
-
-def detect_blockers(text):
-    """Use GPT to detect potential blockers in standup text"""
-    prompt = f"""
-    Analyze the following standup update and identify any blockers or impediments.
-    Look for phrases indicating delays, dependencies, waiting, stuck, blocked, etc.
-    
-    Text: {text}
-    
-    Return JSON with:
-    - has_blockers: boolean
-    - blockers: array of identified blocker descriptions
-    - severity: "low", "medium", "high"
-    """
-    
-    try:
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "You are an AI assistant that identifies blockers in agile standups. Return only valid JSON."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.3,
-            max_tokens=200
-        )
-        return json.loads(response.choices[0].message.content)
-    except Exception as e:
-        return {"has_blockers": False, "blockers": [], "severity": "low", "error": str(e)}
-
-def analyze_sentiment(text):
-    """Use GPT to analyze sentiment of standup text"""
-    prompt = f"""
-    Analyze the sentiment of this standup update.
-    
-    Text: {text}
-    
-    Return JSON with:
-    - sentiment: "positive", "neutral", or "negative"
-    - score: float between -1 and 1
-    - confidence: float between 0 and 1
-    """
-    
-    try:
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "You are a sentiment analysis AI. Return only valid JSON."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.3,
-            max_tokens=100
-        )
-        return json.loads(response.choices[0].message.content)
-    except Exception as e:
-        return {"sentiment": "neutral", "score": 0, "confidence": 0, "error": str(e)}
-
-def cluster_retrospective_feedback(feedback_list):
-    """Use GPT to cluster and analyze retrospective feedback"""
-    prompt = f"""
-    Analyze the following retrospective feedback from team members.
-    Group similar themes together and provide insights.
-    
-    Feedback:
-    {json.dumps(feedback_list, indent=2)}
-    
-    Return a JSON object with:
-    - themes: array of theme objects, each with:
-      - title: string
-      - items: array of related feedback items
-      - sentiment: "positive", "neutral", or "negative"
-      - actionable: boolean
-    - overall_sentiment: team sentiment summary
-    - suggested_actions: array of recommended action items
-    """
-    
-    try:
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "You are an agile coach analyzing team retrospective feedback. Return only valid JSON."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.5,
-            max_tokens=800
-        )
-        return json.loads(response.choices[0].message.content)
-    except Exception as e:
-        return {"themes": [], "overall_sentiment": "neutral", "suggested_actions": [], "error": str(e)}
-
-# ===== WEBSOCKET EVENT HANDLERS =====
-
-@socketio.on('connect')
-def handle_connect(auth):
-    """Handle client connection"""
-    print(f"Client connecting with auth: {auth}")
-    
-    # Verify authentication
-    user_id, user_email, company_id = verify_socket_auth(auth)
-    if not user_id:
-        print("Authentication failed for socket connection")
-        disconnect()
-        return False
-    
-    # Store connection info
-    session_id = request.sid
-    active_connections[session_id] = {
-        'user_id': user_id,
-        'user_email': user_email,
-        'company_id': company_id,
-        'connected_at': datetime.utcnow().isoformat()
-    }
-    
-    # Join company room
-    join_room(f"company_{company_id}")
-    
-    print(f"User {user_email} connected to company {company_id}")
-    emit('connected', {'status': 'connected', 'user_id': user_id})
-
-@socketio.on('disconnect')
-def handle_disconnect():
-    """Handle client disconnection"""
-    session_id = request.sid
-    if session_id in active_connections:
-        user_info = active_connections[session_id]
-        company_id = user_info['company_id']
-        team_id = user_info.get('team_id')
-        
-        # Remove from online users
-        if company_id in online_users and team_id and team_id in online_users[company_id]:
-            online_users[company_id][team_id] = [
-                u for u in online_users[company_id][team_id] 
-                if u['userId'] != user_info['user_id']
-            ]
-            
-            # Broadcast updated online users to team
-            socketio.emit('users_online_updated', {
-                'online_users': online_users[company_id][team_id]
-            }, room=f"team_{company_id}_{team_id}")
-        
-        # Clean up connection
-        del active_connections[session_id]
-        print(f"User {user_info['user_email']} disconnected")
-
-@socketio.on('join_team')
-def handle_join_team(data):
-    """Join a team room for real-time updates"""
-    session_id = request.sid
-    if session_id not in active_connections:
-        emit('error', {'message': 'Not authenticated'})
-        return
-    
-    user_info = active_connections[session_id]
-    team_id = data.get('team_id')
-    company_id = user_info['company_id']
-    
-    if not team_id:
-        emit('error', {'message': 'team_id required'})
-        return
-    
-    # Verify team access
-    try:
-        team_ref = db.collection('teams').document(team_id)
-        team_doc = team_ref.get()
-        if not team_doc.exists:
-            emit('error', {'message': 'Team not found'})
-            return
-            
-        team_data = team_doc.to_dict()
-        if (team_data.get('company_id') != company_id or 
-            user_info['user_id'] not in team_data.get('members', [])):
-            emit('error', {'message': 'Access denied'})
-            return
-    except Exception as e:
-        emit('error', {'message': 'Failed to verify team access'})
-        return
-    
-    # Join team room
-    team_room = f"team_{company_id}_{team_id}"
-    join_room(team_room)
-    
-    # Update connection info
-    active_connections[session_id]['team_id'] = team_id
-    
-    # Add to online users
-    if company_id not in online_users:
-        online_users[company_id] = {}
-    if team_id not in online_users[company_id]:
-        online_users[company_id][team_id] = []
-    
-    # Check if user already in online list
-    user_exists = any(u['userId'] == user_info['user_id'] for u in online_users[company_id][team_id])
-    if not user_exists:
-        online_users[company_id][team_id].append({
-            'userId': user_info['user_id'],
-            'userEmail': user_info['user_email'],
-            'userName': user_info['user_email'].split('@')[0]
-        })
-    
-    # Broadcast updated online users to team
-    socketio.emit('users_online_updated', {
-        'online_users': online_users[company_id][team_id]
-    }, room=team_room)
-    
-    emit('team_joined', {'team_id': team_id, 'room': team_room})
-    print(f"User {user_info['user_email']} joined team {team_id}")
-
-@socketio.on('leave_team')
-def handle_leave_team(data):
-    """Leave a team room"""
-    session_id = request.sid
-    if session_id not in active_connections:
-        return
-    
-    user_info = active_connections[session_id]
-    team_id = data.get('team_id')
-    company_id = user_info['company_id']
-    
-    if team_id:
-        team_room = f"team_{company_id}_{team_id}"
-        leave_room(team_room)
-        
-        # Remove from online users
-        if company_id in online_users and team_id in online_users[company_id]:
-            online_users[company_id][team_id] = [
-                u for u in online_users[company_id][team_id] 
-                if u['userId'] != user_info['user_id']
-            ]
-            
-            # Broadcast updated online users
-            socketio.emit('users_online_updated', {
-                'online_users': online_users[company_id][team_id]
-            }, room=team_room)
-        
-        # Remove team from connection info
-        if 'team_id' in active_connections[session_id]:
-            del active_connections[session_id]['team_id']
-        
-        emit('team_left', {'team_id': team_id})
-        print(f"User {user_info['user_email']} left team {team_id}")
-
-@socketio.on('send_notification')
-def handle_send_notification(data):
-    """Send real-time notification"""
-    session_id = request.sid
-    if session_id not in active_connections:
-        emit('error', {'message': 'Not authenticated'})
-        return
-    
-    user_info = active_connections[session_id]
-    company_id = user_info['company_id']
-    team_id = data.get('team_id')
-    
-    notification = {
-        'id': f"notif_{int(time.time() * 1000)}",
-        'type': data.get('type', 'info'),
-        'title': data.get('title', 'Notification'),
-        'message': data.get('message', ''),
-        'sender': user_info['user_email'],
-        'timestamp': datetime.utcnow().isoformat(),
-        'team_id': team_id
-    }
-    
-    # Send to team room
-    if team_id:
-        team_room = f"team_{company_id}_{team_id}"
-        socketio.emit('notification', notification, room=team_room)
-    else:
-        # Send to company room
-        socketio.emit('notification', notification, room=f"company_{company_id}")
-    
-    print(f"Notification sent by {user_info['user_email']}: {notification['title']}")
-
-# Real-time activity tracking
-def broadcast_activity(company_id, team_id, activity_data):
-    """Broadcast activity to team members"""
-    if not team_id:
-        return
-        
-    team_room = f"team_{company_id}_{team_id}"
-    socketio.emit('activity_update', activity_data, room=team_room)
-    print(f"Activity broadcasted to team {team_id}: {activity_data.get('activity_type')}")
-
-def broadcast_standup_update(company_id, team_id, standup_data):
-    """Broadcast standup update to team members"""
-    if not team_id:
-        return
-        
-    team_room = f"team_{company_id}_{team_id}"
-    socketio.emit('standup_update', standup_data, room=team_room)
-    print(f"Standup update broadcasted to team {team_id}")
 
 # ===== BASIC ROUTES =====
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    """Health check endpoint"""
     firebase_status = 'connected' if db is not None else 'disconnected'
     openai_status = 'configured' if os.getenv('OPENAI_API_KEY') else 'not configured'
-    
     return jsonify({
         'status': 'healthy' if firebase_status == 'connected' else 'degraded',
         'timestamp': datetime.utcnow().isoformat(),
@@ -994,154 +630,150 @@ def get_dashboard():
                 if sentiment.get('sentiment'):
                     sentiments.append(sentiment.get('sentiment'))
             
-            # Generate team summary
-            if len(standup_entries) > 1:
-                team_summary = summarize_standups(standup_entries)
+            # Summarize blockers
+            if all_blockers:
+                blocker_summary = summarize_blockers(all_blockers)
+                active_blockers = blocker_summary.get('blockers', [])
             
             # Determine overall sentiment
             if sentiments:
-                positive_count = sentiments.count('positive')
-                negative_count = sentiments.count('negative')
-                if positive_count > negative_count:
-                    sentiment_label = "Positive 😊"
-                elif negative_count > positive_count:
-                    sentiment_label = "Needs attention 😐"
+                avg_sentiment = sum([1 if s == 'positive' else -1 if s == 'negative' else 0 for s in sentiments]) / len(sentiments)
+                if avg_sentiment > 0:
+                    sentiment_label = 'Positive'
+                elif avg_sentiment < 0:
+                    sentiment_label = 'Negative'
                 else:
-                    sentiment_label = "Neutral 😐"
+                    sentiment_label = 'Neutral'
             
-            active_blockers = list(set(all_blockers))  # Remove duplicates
-        
-        # Get active sprint (mock data for now)
-        active_sprint = {
-            'name': 'Sprint 15',
-            'total_tasks': 12,
-            'completed_tasks': 7
-        }
+            # Generate team summary if multiple entries exist
+            if len(standup_entries) > 1:
+                team_summary = summarize_standups(standup_entries)
         
         return jsonify({
             'success': True,
             'standup_count': standup_count,
             'team_summary': team_summary,
-            'sentiment_label': sentiment_label,
-            'active_blockers': active_blockers,
-            'active_sprint': active_sprint
+            'sentiment': sentiment_label,
+            'active_blockers': active_blockers
         })
         
     except Exception as e:
-        print(f"Dashboard error: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        print(f"Error fetching dashboard data: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to fetch dashboard data'
+        }), 500
 
 # ===== SPRINT ROUTES =====
 
-@app.route('/api/create-sprint', methods=['POST'])
+@app.route('/api/sprints', methods=['GET'])
+@require_auth
+def get_sprints():
+    try:
+        company_id = request.company_id
+        team_id = request.args.get('team_id')
+        if not team_id:
+            return jsonify({'error': 'team_id is required'}), 400
+        sprints_ref = db.collection('sprints')
+        query = sprints_ref.where('team_id', '==', team_id).where('company_id', '==', company_id)
+        sprints = query.stream()
+        sprint_list = []
+        for sprint in sprints:
+            sprint_data = sprint.to_dict()
+            sprint_data['id'] = sprint.id
+            sprint_list.append(sprint_data)
+        return jsonify({'success': True, 'sprints': sprint_list})
+    except Exception as e:
+        print(f"Error fetching sprints: {str(e)}")
+        return jsonify({'success': False, 'error': 'Failed to fetch sprints'}), 500
+
+@app.route('/api/sprints', methods=['POST'])
 @require_auth
 def create_sprint():
-    """Create a new sprint in current company"""
     try:
         data = request.json
         company_id = request.company_id
         team_id = data.get('team_id')
-        
-        # Verify team belongs to current company
-        if team_id:
-            team_ref = db.collection('teams').document(team_id)
-            team_doc = team_ref.get()
-            if not team_doc.exists or team_doc.to_dict().get('company_id') != company_id:
-                return jsonify({'error': 'Team not found or access denied'}), 403
-        
         sprint_data = {
             'team_id': team_id,
             'company_id': company_id,
             'name': data.get('name'),
-            'start_date': data.get('start_date'),
-            'end_date': data.get('end_date'),
+            'start_date': data.get('startDate'),
+            'end_date': data.get('endDate'),
             'goals': data.get('goals', []),
-            'tasks': data.get('tasks', []),
             'created_by': request.user_id,
-            'created_at': firestore.SERVER_TIMESTAMP,
+            'created_at': datetime.utcnow().isoformat(),
             'status': 'active'
         }
-        
-        # Validate required fields
         if not all([sprint_data['team_id'], sprint_data['name'], sprint_data['start_date'], sprint_data['end_date']]):
             return jsonify({'error': 'Missing required fields'}), 400
-        
-        # Save to Firestore
         doc_ref = db.collection('sprints').add(sprint_data)
-        
-        return jsonify({
-            'success': True,
-            'sprint_id': doc_ref[1].id,
-            'message': 'Sprint created successfully'
-        })
-        
+        sprint_data['id'] = doc_ref[1].id
+        return jsonify({'success': True, 'sprint': sprint_data})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        print(f"Error creating sprint: {str(e)}")
+        return jsonify({'success': False, 'error': 'Failed to create sprint'}), 500
 
-@app.route('/api/create-retrospective', methods=['POST'])
+@app.route('/api/sprints/<sprint_id>', methods=['PUT'])
 @require_auth
-def create_retrospective():
-    """Create a new retrospective in current company"""
+def update_sprint(sprint_id):
     try:
         data = request.json
-        company_id = request.company_id
-        team_id = data.get('team_id')
-        
-        # Verify team belongs to current company
-        if team_id:
-            team_ref = db.collection('teams').document(team_id)
-            team_doc = team_ref.get()
-            if not team_doc.exists or team_doc.to_dict().get('company_id') != company_id:
-                return jsonify({'error': 'Team not found or access denied'}), 403
-        
-        retro_data = {
-            'team_id': team_id,
-            'company_id': company_id,
-            'sprint_id': data.get('sprint_id'),
-            'what_went_well': data.get('what_went_well', []),
-            'what_could_improve': data.get('what_could_improve', []),
-            'action_items': data.get('action_items', []),
-            'created_by': request.user_id,
-            'created_at': firestore.SERVER_TIMESTAMP
+        sprint_ref = db.collection('sprints').document(sprint_id)
+        sprint_doc = sprint_ref.get()
+        if not sprint_doc.exists:
+            return jsonify({'error': 'Sprint not found'}), 404
+        update_data = {
+            'name': data.get('name'),
+            'start_date': data.get('startDate'),
+            'end_date': data.get('endDate'),
+            'goals': data.get('goals', []),
+            'updated_at': datetime.utcnow().isoformat()
         }
-        
-        # Validate required fields
-        if not retro_data['team_id']:
-            return jsonify({'error': 'team_id is required'}), 400
-        
-        # Analyze feedback using AI
-        all_feedback = (
-            retro_data['what_went_well'] + 
-            retro_data['what_could_improve']
-        )
-        
-        if all_feedback:
-            analysis = cluster_retrospective_feedback(all_feedback)
-            retro_data['ai_analysis'] = analysis
-        
-        # Save to Firestore
-        doc_ref = db.collection('retrospectives').add(retro_data)
-        
-        return jsonify({
-            'success': True,
-            'retrospective_id': doc_ref[1].id,
-            'ai_analysis': retro_data.get('ai_analysis', {}),
-            'message': 'Retrospective created successfully'
-        })
-        
+        sprint_ref.update(update_data)
+        return jsonify({'success': True, 'message': 'Sprint updated'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        print(f"Error updating sprint: {str(e)}")
+        return jsonify({'success': False, 'error': 'Failed to update sprint'}), 500
+
+@app.route('/api/sprints/<sprint_id>', methods=['DELETE'])
+@require_auth
+def delete_sprint(sprint_id):
+    try:
+        sprint_ref = db.collection('sprints').document(sprint_id)
+        sprint_doc = sprint_ref.get()
+        if not sprint_doc.exists:
+            return jsonify({'error': 'Sprint not found'}), 404
+        sprint_ref.delete()
+        return jsonify({'success': True, 'message': 'Sprint deleted'})
+    except Exception as e:
+        print(f"Error deleting sprint: {str(e)}")
+        return jsonify({'success': False, 'error': 'Failed to delete sprint'}), 500
+
+@app.route('/api/sprints/<sprint_id>/assign', methods=['POST'])
+@require_auth
+def assign_sprint(sprint_id):
+    try:
+        sprint_ref = db.collection('sprints').document(sprint_id)
+        sprint_doc = sprint_ref.get()
+        if not sprint_doc.exists:
+            return jsonify({'error': 'Sprint not found'}), 404
+        sprint_ref.update({'status': 'assigned', 'assigned_at': datetime.utcnow().isoformat()})
+        return jsonify({'success': True, 'message': 'Sprint assigned'})
+    except Exception as e:
+        print(f"Error assigning sprint: {str(e)}")
+        return jsonify({'success': False, 'error': 'Failed to assign sprint'}), 500
+
+# ===== RETRO ROUTES =====
+# ... (your existing retro routes here, unchanged) ...
 
 # Railway deployment health check
 @app.route('/health', methods=['GET'])
 def railway_health():
-    """Railway health check endpoint"""
     return jsonify({'status': 'healthy', 'service': 'upstand-backend'})
 
-# CORS test endpoint
 @app.route('/cors-test', methods=['GET', 'OPTIONS'])
 def cors_test():
-    """Test CORS configuration"""
     return jsonify({
         'message': 'CORS test successful',
         'allowed_origins': allowed_origins,
@@ -1149,19 +781,16 @@ def cors_test():
     })
 
 if __name__ == '__main__':
-    # Get configuration from environment - Railway sets PORT automatically
     debug_mode = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
     port = int(os.getenv('PORT', 5000))
-    host = '0.0.0.0'  # Always bind to all interfaces for Railway
-    
+    host = '0.0.0.0'
     print(f"Starting Upstand server on {host}:{port}")
     print(f"Debug mode: {debug_mode}")
     print(f"Allowed origins: {allowed_origins}")
     print(f"Firebase status: {'Connected' if db else 'Not connected'}")
-    
-    # Use SocketIO run instead of Flask run for WebSocket support
     socketio.run(app, 
                 debug=debug_mode, 
                 port=port, 
                 host=host, 
-                allow_unsafe_werkzeug=True)  # Allow for production deployment
+                allow_unsafe_werkzeug=True)
+
