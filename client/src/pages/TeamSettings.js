@@ -62,6 +62,7 @@ function TeamSettings() {
       const stored = localStorage.getItem(key);
       return stored ? JSON.parse(stored) : [];
     } catch (error) {
+      console.error('Error reading local teams:', error);
       return [];
     }
   };
@@ -72,18 +73,12 @@ function TeamSettings() {
       const key = `teams_${currentCompany.id}_${currentUser.uid}`;
       localStorage.setItem(key, JSON.stringify(teams));
     } catch (error) {
-      console.error('Error saving teams:', error);
+      console.error('Error saving local teams:', error);
     }
   };
 
   const handleCreateTeam = async (e) => {
     e.preventDefault();
-    
-    if (!isManager) {
-      setError('Only managers can create teams. Please contact your manager or change your role in settings.');
-      return;
-    }
-    
     if (!newTeamName.trim()) {
       setError('Team name is required');
       return;
@@ -91,67 +86,16 @@ function TeamSettings() {
 
     setLoading(true);
     setError('');
-    
+
     try {
-      console.log('Creating team:', newTeamName);
-      
-      let success = false;
-      
-      // Try the context's createTeam method first
-      if (createTeam && typeof createTeam === 'function') {
-        try {
-          console.log('Trying createTeam from context...');
-          await createTeam({ name: newTeamName.trim() });
-          success = true;
-          console.log('Context createTeam worked');
-        } catch (contextError) {
-          console.log('Context createTeam failed:', contextError);
-        }
-      }
-      
-      // Fallback to local state management if all APIs fail
-      if (!success) {
-        console.log('Using local state fallback for team creation');
-        
-        const newTeam = {
-          id: `team_${Date.now()}`,
-          name: newTeamName.trim(),
-          role: 'OWNER',
-          member_count: 1,
-          owner_name: currentUser?.email || 'You',
-          company_id: currentCompany?.id || 'demo',
-          created_at: new Date().toISOString(),
-          members: [
-            {
-              id: currentUser?.uid || 'user_1',
-              email: currentUser?.email || 'user@example.com',
-              name: currentUser?.displayName || 'You',
-              role: 'OWNER',
-              joined_at: new Date().toISOString()
-            }
-          ]
-        };
-        
-        const localTeams = getLocalTeams();
-        localTeams.push(newTeam);
-        saveLocalTeams(localTeams);
-        
-        // Update teams state if available
-        if (refreshTeams && typeof refreshTeams === 'function') {
-          await refreshTeams();
-        }
-        
-        success = true;
-        console.log('Team created locally:', newTeam);
-      }
-      
-      if (success) {
+      const response = await createTeam(newTeamName.trim());
+      if (response && response.success !== false) {
         setNewTeamName('');
         setShowCreateForm(false);
-        setError('');
-        await fetchAvailableTeams();
+        alert(`Team "${newTeamName}" created successfully! You can now invite members and start managing standups.`);
+      } else {
+        throw new Error(response?.error || 'Failed to create team');
       }
-      
     } catch (error) {
       console.error('Team creation error:', error);
       setError('Failed to create team: ' + error.message);
@@ -229,6 +173,52 @@ function TeamSettings() {
     }
   };
 
+  const handleDeleteTeam = async (teamId, teamName) => {
+    if (window.confirm(`⚠️ DELETE TEAM WARNING ⚠️\n\nAre you sure you want to permanently delete "${teamName}"?\n\nThis will:\n• Remove all team data\n• Delete all standups and history\n• Remove all team members\n• Cannot be undone\n\nType "DELETE" in the next prompt to confirm.`)) {
+      const confirmation = prompt(`To delete "${teamName}", type "DELETE" (all caps):`);
+      
+      if (confirmation === 'DELETE') {
+        try {
+          // Make API call to delete team from database
+          const response = await api.delete(`/teams/${teamId}`);
+          
+          if (response.data.success) {
+            // Remove team from localStorage
+            const localTeams = getLocalTeams();
+            const updatedTeams = localTeams.filter(team => team.id !== teamId);
+            saveLocalTeams(updatedTeams);
+            
+            // Update teams context
+            if (refreshTeams && typeof refreshTeams === 'function') {
+              await refreshTeams();
+            }
+            
+            // If this was the current team, clear selection
+            if (currentTeam?.id === teamId) {
+              setCurrentTeam(null);
+            }
+            
+            // Close dropdown and refresh UI
+            setShowDropdown(null);
+            await fetchAvailableTeams();
+            
+            alert(`Team "${teamName}" has been permanently deleted.`);
+            
+            // Force page refresh to show updated teams
+            window.location.reload();
+          } else {
+            throw new Error(response.data.error || 'Failed to delete team');
+          }
+        } catch (error) {
+          console.error('Delete team error:', error);
+          alert('Failed to delete team: ' + (error.response?.data?.error || error.message));
+        }
+      } else {
+        alert('Team deletion cancelled - confirmation text did not match.');
+      }
+    }
+  };
+
   const handleShowMembers = (team) => {
     // Mock team members for demo
     const mockMembers = [
@@ -287,44 +277,6 @@ function TeamSettings() {
     }
   };
 
-  const handleDeleteTeam = async (teamId, teamName) => {
-    if (window.confirm(`⚠️ DELETE TEAM WARNING ⚠️\n\nAre you sure you want to permanently delete "${teamName}"?\n\nThis will:\n• Remove all team data\n• Delete all standups and history\n• Remove all team members\n• Cannot be undone\n\nType "DELETE" in the next prompt to confirm.`)) {
-      const confirmation = prompt(`To delete "${teamName}", type "DELETE" (all caps):`);
-      
-      if (confirmation === 'DELETE') {
-        try {
-          // Remove team from localStorage
-          const localTeams = getLocalTeams();
-          const updatedTeams = localTeams.filter(team => team.id !== teamId);
-          saveLocalTeams(updatedTeams);
-          
-          // Update teams context
-          if (refreshTeams && typeof refreshTeams === 'function') {
-            await refreshTeams();
-          }
-          
-          // If this was the current team, clear selection
-          if (currentTeam?.id === teamId) {
-            setCurrentTeam(null);
-          }
-          
-          // Close dropdown and refresh UI
-          setShowDropdown(null);
-          await fetchAvailableTeams();
-          
-          alert(`Team "${teamName}" has been permanently deleted.`);
-          
-          // Force page refresh to show updated teams
-          window.location.reload();
-        } catch (error) {
-          alert('Failed to delete team: ' + error.message);
-        }
-      } else {
-        alert('Team deletion cancelled - confirmation text did not match.');
-      }
-    }
-  };
-
   const isUserAlreadyInTeam = (teamId) => {
     return teams && teams.some(team => team.id === teamId);
   };
@@ -379,80 +331,99 @@ function TeamSettings() {
                     key={team.id} 
                     className={`p-4 border rounded-lg cursor-pointer transition-colors ${
                       currentTeam?.id === team.id 
-                        ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-200' 
-                        : 'border-gray-200 hover:bg-gray-50 hover:border-gray-300'
+                        ? 'border-blue-500 bg-blue-50' 
+                        : 'border-gray-200 hover:bg-gray-50'
                     }`}
                     onClick={() => setCurrentTeam(team)}
                   >
-                    <div className="flex items-center space-x-3">
-                      <UserGroupIcon className="w-5 h-5 text-gray-600" />
-                      <div className="flex-1">
-                        <h3 className="font-medium text-gray-900">{team.name}</h3>
-                        <div className="flex items-center space-x-2 mt-1">
-                          {getRoleIcon(team.role)}
-                          <span className={`text-sm font-medium ${roleInfo.color}`}>
-                            {roleInfo.name}
-                          </span>
-                          <span className="text-xs text-gray-500">
-                            • {roleInfo.description}
-                          </span>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-3">
+                        {getRoleIcon(team.role)}
+                        <div>
+                          <h3 className="font-semibold">{team.name}</h3>
+                          <p className="text-sm text-gray-600">
+                            {roleInfo.name} • {team.member_count || 1} members
+                          </p>
                         </div>
                       </div>
-                      <div className="flex items-center space-x-2">
-                        {currentTeam?.id === team.id && (
-                          <div className="text-blue-600 text-sm font-medium">Selected</div>
-                        )}
+                      
+                      <div className="relative">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setShowDropdown(showDropdown === team.id ? null : team.id);
+                          }}
+                          className="p-1 hover:bg-gray-200 rounded-full"
+                        >
+                          <EllipsisVerticalIcon className="w-5 h-5 text-gray-500" />
+                        </button>
                         
-                        {/* 3-dot menu */}
-                        <div className="relative">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setShowDropdown(showDropdown === team.id ? null : team.id);
-                            }}
-                            className="p-1 hover:bg-gray-200 rounded"
-                          >
-                            <EllipsisVerticalIcon className="w-5 h-5 text-gray-500" />
-                          </button>
-                          
-                          {showDropdown === team.id && (
-                            <div className="absolute right-0 mt-2 w-56 bg-white rounded-md shadow-lg z-10 border">
-                              <div className="py-1">
+                        {showDropdown === team.id && (
+                          <div className="absolute right-0 mt-2 w-48 bg-white border border-gray-200 rounded-md shadow-lg z-10">
+                            <div className="py-1">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleShowMembers(team);
+                                }}
+                                className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 w-full text-left"
+                              >
+                                <UserIcon className="w-4 h-4 mr-2" />
+                                View Members
+                              </button>
+                              
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleAssignRole(team.id, team.name);
+                                }}
+                                className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 w-full text-left"
+                              >
+                                <CogIcon className="w-4 h-4 mr-2" />
+                                Change My Role
+                              </button>
+                              
+                              {team.role === 'OWNER' && (
                                 <button
-                                  onClick={() => handleShowMembers(team)}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handlePromoteUser(team.id, team.name);
+                                  }}
                                   className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 w-full text-left"
                                 >
-                                  <UserIcon className="w-4 h-4 mr-2" />
-                                  View Members ({team.member_count || 1})
+                                  <UserPlusIcon className="w-4 h-4 mr-2" />
+                                  Manage Members
                                 </button>
+                              )}
+                              
+                              <div className="border-t border-gray-100"></div>
+                              
+                              {team.role !== 'OWNER' ? (
                                 <button
-                                  onClick={() => handleAssignRole(team.id, team.name)}
-                                  className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 w-full text-left"
-                                >
-                                  <CogIcon className="w-4 h-4 mr-2" />
-                                  Change My Role
-                                </button>
-                                <div className="border-t border-gray-100"></div>
-                                <button
-                                  onClick={() => handleLeaveTeam(team.id, team.name)}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleLeaveTeam(team.id, team.name);
+                                  }}
                                   className="flex items-center px-4 py-2 text-sm text-orange-600 hover:bg-orange-50 w-full text-left"
                                 >
-                                  <UserIcon className="w-4 h-4 mr-2" />
+                                  <TrashIcon className="w-4 h-4 mr-2" />
                                   Leave Team
                                 </button>
-                                {(team.role === 'OWNER' || team.role === 'MANAGER') && (
-                                  <button
-                                    onClick={() => handleDeleteTeam(team.id, team.name)}
-                                    className="flex items-center px-4 py-2 text-sm text-red-600 hover:bg-red-50 w-full text-left"
-                                  >
-                                    <TrashIcon className="w-4 h-4 mr-2" />
-                                    Delete Team
-                                  </button>
-                                )}
-                              </div>
+                              ) : (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteTeam(team.id, team.name);
+                                  }}
+                                  className="flex items-center px-4 py-2 text-sm text-red-600 hover:bg-red-50 w-full text-left"
+                                >
+                                  <TrashIcon className="w-4 h-4 mr-2" />
+                                  Delete Team
+                                </button>
+                              )}
                             </div>
-                          )}
-                        </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -522,7 +493,7 @@ function TeamSettings() {
                     setNewTeamName('');
                     setError('');
                   }}
-                  className="bg-gray-300 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-400 transition-colors"
+                  className="px-4 py-2 text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
                 >
                   Cancel
                 </button>
@@ -537,64 +508,43 @@ function TeamSettings() {
           {loadingAvailable ? (
             <div className="text-center py-4">
               <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto"></div>
-              <p className="text-gray-500 mt-2">Loading available teams...</p>
+              <p className="text-sm text-gray-600 mt-2">Loading available teams...</p>
             </div>
-          ) : availableTeams.length > 0 ? (
+          ) : availableTeams && availableTeams.length > 0 ? (
             <div className="space-y-3">
-              {availableTeams.map(team => {
-                return (
-                  <div key={team.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50">
-                    <div className="flex items-center space-x-3">
-                      <UserGroupIcon className="w-5 h-5 text-gray-600" />
-                      <div>
-                        <h3 className="font-medium text-gray-900">{team.name}</h3>
-                        <p className="text-sm text-gray-600">
-                          {team.member_count} members • Owner: {team.owner_name}
-                        </p>
-                      </div>
+              {availableTeams
+                .filter(team => !isUserAlreadyInTeam(team.id))
+                .map(team => (
+                <div key={team.id} className="p-4 border border-gray-200 rounded-lg hover:bg-gray-50">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="font-semibold">{team.name}</h3>
+                      <p className="text-sm text-gray-600">
+                        {team.member_count || 1} members • Owner: {team.owner_name || 'Unknown'}
+                      </p>
                     </div>
-                    <div className="flex items-center space-x-2">
-                      {isUserAlreadyInTeam(team.id) ? (
-                        <span className="px-4 py-2 text-sm text-gray-500 bg-gray-100 rounded-md">
-                          Already Member
-                        </span>
-                      ) : (
-                        <button
-                          onClick={() => handleJoinTeam(team.id, team.name)}
-                          className="px-4 py-2 text-sm bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
-                        >
-                          Join Team
-                        </button>
-                      )}
-                    </div>
+                    <button
+                      onClick={() => handleJoinTeam(team.id, team.name)}
+                      className="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 transition-colors text-sm"
+                    >
+                      Join Team
+                    </button>
                   </div>
-                );
-              })}
+                </div>
+              ))}
+              
+              {availableTeams.filter(team => !isUserAlreadyInTeam(team.id)).length === 0 && (
+                <div className="text-center py-8 text-gray-500">
+                  <p>No available teams to join.</p>
+                  <p className="text-sm mt-2">Create a new team or ask your manager to invite you to an existing team.</p>
+                </div>
+              )}
             </div>
           ) : (
             <div className="text-center py-8 text-gray-500">
-              <p>No available teams to join at the moment.</p>
+              <p>No teams available at the moment.</p>
             </div>
           )}
-        </div>
-
-        {/* Role Hierarchy Info */}
-        <div className="border-t pt-6 mt-6">
-          <h2 className="text-lg font-semibold mb-4">Team Roles</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {Object.entries(ROLES).map(([key, role]) => {
-              const IconComponent = role.icon;
-              return (
-                <div key={key} className="flex items-start space-x-3 p-3 bg-gray-50 rounded-lg">
-                  <IconComponent className={`w-5 h-5 ${role.color} flex-shrink-0 mt-0.5`} />
-                  <div>
-                    <h3 className={`font-medium ${role.color}`}>{role.name}</h3>
-                    <p className="text-sm text-gray-600">{role.description}</p>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
         </div>
       </div>
 
@@ -602,18 +552,16 @@ function TeamSettings() {
       {showRoleModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 w-96 max-w-90vw">
-            <h3 className="text-lg font-semibold mb-4">Change Your Role in {showRoleModal.teamName}</h3>
+            <h3 className="text-lg font-semibold mb-4">Change Role in {showRoleModal.teamName}</h3>
             <div className="space-y-3">
-              {Object.entries(ROLES).map(([key, role]) => {
+              {Object.entries(ROLES).map(([roleKey, role]) => {
                 const IconComponent = role.icon;
                 return (
                   <button
-                    key={key}
-                    onClick={() => handleChangeRole(key)}
-                    className={`w-full text-left p-3 rounded-lg border transition-colors ${
-                      showRoleModal.currentRole === key 
-                        ? 'border-blue-500 bg-blue-50' 
-                        : 'border-gray-200 hover:bg-gray-50'
+                    key={roleKey}
+                    onClick={() => handleChangeRole(roleKey)}
+                    className={`w-full p-3 text-left border rounded-lg hover:bg-gray-50 ${
+                      showRoleModal.currentRole === roleKey ? 'border-blue-500 bg-blue-50' : 'border-gray-200'
                     }`}
                   >
                     <div className="flex items-center space-x-3">
