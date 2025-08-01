@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { TeamProvider } from './context/TeamContext';
+import { CompanyProvider } from './context/CompanyContext';
 import { useAuth } from './context/AuthContext';
 import webSocketService from './services/websocket';
 
@@ -9,19 +10,19 @@ import webSocketService from './services/websocket';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
-import TeamSettings from './pages/TeamSettings';  // Fixed: was Teams, now TeamSettings
+import TeamSettings from './pages/TeamSettings';
 import StandupForm from './pages/StandupForm';
 import SprintPlanning from './pages/SprintPlanning';
-import Retrospective from './pages/Retrospective';  // Fixed: was Retrospectives, now Retrospective (singular)
-import ProtectedRoute from './components/ProtectedRoute';
+import Retrospective from './pages/Retrospective';
+import PrivateRoute from './components/PrivateRoute';
 
 // WebSocket Connection Component
 function WebSocketManager() {
-  const { user } = useAuth();
+  const { currentUser } = useAuth();
   const [connectionStatus, setConnectionStatus] = useState('disconnected');
 
   useEffect(() => {
-    if (user) {
+    if (currentUser) {
       console.log('🔌 User logged in, connecting WebSocket...');
       webSocketService.connect();
       
@@ -45,7 +46,7 @@ function WebSocketManager() {
         webSocketService.disconnect();
       };
     }
-  }, [user]);
+  }, [currentUser]);
 
   // Show connection status in development
   if (process.env.NODE_ENV === 'development') {
@@ -80,42 +81,15 @@ function AppContent() {
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
         
-        {/* Protected Routes */}
-        <Route path="/" element={
-          <ProtectedRoute>
-            <Navigate to="/dashboard" replace />
-          </ProtectedRoute>
-        } />
-        
-        <Route path="/dashboard" element={
-          <ProtectedRoute>
-            <Dashboard />
-          </ProtectedRoute>
-        } />
-        
-        <Route path="/teams" element={
-          <ProtectedRoute>
-            <TeamSettings />
-          </ProtectedRoute>
-        } />
-        
-        <Route path="/standup" element={
-          <ProtectedRoute>
-            <StandupForm />
-          </ProtectedRoute>
-        } />
-        
-        <Route path="/sprint-planning" element={
-          <ProtectedRoute>
-            <SprintPlanning />
-          </ProtectedRoute>
-        } />
-        
-        <Route path="/retrospectives" element={
-          <ProtectedRoute>
-            <Retrospective />
-          </ProtectedRoute>
-        } />
+        {/* Protected Routes - using PrivateRoute wrapper */}
+        <Route element={<PrivateRoute />}>
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/teams" element={<TeamSettings />} />
+          <Route path="/standup" element={<StandupForm />} />
+          <Route path="/sprint-planning" element={<SprintPlanning />} />
+          <Route path="/retrospectives" element={<Retrospective />} />
+        </Route>
         
         {/* Catch all route */}
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
@@ -127,11 +101,13 @@ function AppContent() {
 function App() {
   return (
     <AuthProvider>
-      <TeamProvider>
-        <Router>
-          <AppContent />
-        </Router>
-      </TeamProvider>
+      <CompanyProvider>
+        <TeamProvider>
+          <Router>
+            <AppContent />
+          </Router>
+        </TeamProvider>
+      </CompanyProvider>
     </AuthProvider>
   );
 }
