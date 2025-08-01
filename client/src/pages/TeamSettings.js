@@ -88,17 +88,28 @@ function TeamSettings() {
     setError('');
 
     try {
-      const response = await createTeam(newTeamName.trim());
-      if (response && response.success !== false) {
+      // Make direct API call to create team
+      const response = await api.post('/teams', {
+        name: newTeamName.trim(),
+        description: ''
+      });
+      
+      if (response.data.success) {
         setNewTeamName('');
         setShowCreateForm(false);
         alert(`Team "${newTeamName}" created successfully! You can now invite members and start managing standups.`);
+        
+        // Refresh teams
+        if (refreshTeams && typeof refreshTeams === 'function') {
+          await refreshTeams();
+        }
+        await fetchAvailableTeams();
       } else {
-        throw new Error(response?.error || 'Failed to create team');
+        throw new Error(response.data.error || 'Failed to create team');
       }
     } catch (error) {
       console.error('Team creation error:', error);
-      setError('Failed to create team: ' + error.message);
+      setError('Failed to create team: ' + (error.response?.data?.error || error.message));
     } finally {
       setLoading(false);
     }
