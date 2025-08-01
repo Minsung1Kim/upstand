@@ -13,7 +13,7 @@ const ROLES = {
 };
 
 function TeamSettings() {
-  const { teams, currentTeam, setCurrentTeam, createTeam, refreshTeams } = useTeam();
+  const { teams: contextTeams, currentTeam, setCurrentTeam, createTeam, refreshTeams } = useTeam();
   const { currentUser, getUserRole } = useAuth();
   const { currentCompany } = useCompany();
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -25,9 +25,19 @@ function TeamSettings() {
   const [showDropdown, setShowDropdown] = useState(null);
   const [showRoleModal, setShowRoleModal] = useState(null);
   const [showMembersModal, setShowMembersModal] = useState(null);
+  const [localTeams, setLocalTeams] = useState([]); // Add local teams state
 
   const userRole = getUserRole();
   const isManager = userRole === 'MANAGER' || userRole === 'OWNER' || userRole === 'MEMBER';
+
+  // Load local teams on component mount
+  useEffect(() => {
+    const teams = getLocalTeams();
+    setLocalTeams(teams);
+  }, [currentUser, currentCompany]);
+
+  // Use local teams instead of context teams
+  const teams = localTeams.length > 0 ? localTeams : contextTeams;
 
   useEffect(() => {
     fetchAvailableTeams();
@@ -95,62 +105,58 @@ function TeamSettings() {
     try {
       console.log('Creating team:', newTeamName);
       
-      let success = false;
-      
       // Try the context's createTeam method first
       if (createTeam && typeof createTeam === 'function') {
         try {
           console.log('Trying createTeam from context...');
           await createTeam({ name: newTeamName.trim() });
-          success = true;
-          console.log('Context createTeam worked');
+          setNewTeamName('');
+          setShowCreateForm(false);
+          setError('');
+          await fetchAvailableTeams();
+          return;
         } catch (contextError) {
-          console.log('Context createTeam failed:', contextError);
+          console.log('Context createTeam failed, using local fallback:', contextError);
         }
       }
       
-      // Fallback to local state management if all APIs fail
-      if (!success) {
-        console.log('Using local state fallback for team creation');
-        
-        const newTeam = {
-          id: `team_${Date.now()}`,
-          name: newTeamName.trim(),
-          role: 'OWNER',
-          member_count: 1,
-          owner_name: currentUser?.email || 'You',
-          company_id: currentCompany?.id || 'demo',
-          created_at: new Date().toISOString(),
-          members: [
-            {
-              id: currentUser?.uid || 'user_1',
-              email: currentUser?.email || 'user@example.com',
-              name: currentUser?.displayName || 'You',
-              role: 'OWNER',
-              joined_at: new Date().toISOString()
-            }
-          ]
-        };
-        
-        const localTeams = getLocalTeams();
-        localTeams.push(newTeam);
-        saveLocalTeams(localTeams);
-        
-        // Update teams state if available
-        if (refreshTeams && typeof refreshTeams === 'function') {
-          await refreshTeams();
-        }
-        
-        success = true;
-        console.log('Team created locally:', newTeam);
+      // Fallback to local state management
+      console.log('Using local state fallback for team creation');
+      
+      const newTeam = {
+        id: `team_${Date.now()}`,
+        name: newTeamName.trim(),
+        role: 'OWNER',
+        member_count: 1,
+        owner_name: currentUser?.email || 'You',
+        company_id: currentCompany?.id || 'demo',
+        created_at: new Date().toISOString(),
+        members: [
+          {
+            id: currentUser?.uid || 'user_1',
+            email: currentUser?.email || 'user@example.com',
+            name: currentUser?.displayName || 'You',
+            role: 'OWNER',
+            joined_at: new Date().toISOString()
+          }
+        ]
+      };
+      
+      const storedTeams = getLocalTeams();
+      storedTeams.push(newTeam);
+      saveLocalTeams(storedTeams);
+      setLocalTeams(storedTeams); // Update local state immediately
+      
+      // Update teams state if available
+      if (refreshTeams && typeof refreshTeams === 'function') {
+        await refreshTeams();
       }
       
-      if (success) {
-        setNewTeamName('');
-        setShowCreateForm(false);
-        setError('');
-        await fetchAvailableTeams();
-      }
+      setNewTeamName('');
+      setShowCreateForm(false);
+      setError('');
+      await fetchAvailableTeams();
+      console.log('Team created locally:', newTeam);
       
     } catch (error) {
       console.error('Team creation error:', error);
@@ -175,12 +181,13 @@ function TeamSettings() {
         joined_at: new Date().toISOString()
       };
       
-      const localTeams = getLocalTeams();
-      const existingTeam = localTeams.find(t => t.id === teamId);
+      const storedTeams = getLocalTeams();
+      const existingTeam = storedTeams.find(t => t.id === teamId);
       
       if (!existingTeam) {
-        localTeams.push(newTeamMember);
-        saveLocalTeams(localTeams);
+        storedTeams.push(newTeamMember);
+        saveLocalTeams(storedTeams);
+        setLocalTeams(storedTeams); // Update local state immediately
         
         if (refreshTeams && typeof refreshTeams === 'function') {
           await refreshTeams();
@@ -201,28 +208,19 @@ function TeamSettings() {
     if (window.confirm(`Are you sure you want to leave "${teamName}"? You'll lose access to team standups and data.`)) {
       try {
         // Remove from local teams
-        const localTeams = getLocalTeams();
-        const updatedTeams = localTeams.filter(team => team.id !== teamId);
+        const storedTeams = getLocalTeams();
+        const updatedTeams = storedTeams.filter(team => team.id !== teamId);
         saveLocalTeams(updatedTeams);
-        
-        // Update teams context
-        if (refreshTeams && typeof refreshTeams === 'function') {
-          await refreshTeams();
-        }
+        setLocalTeams(updatedTeams); // Update local state immediately
         
         // If this was the current team, clear selection
         if (currentTeam?.id === teamId) {
           setCurrentTeam(null);
         }
         
-        // Close dropdown and refresh UI
         setShowDropdown(null);
         await fetchAvailableTeams();
-        
         alert(`You have left "${teamName}". You can rejoin later if needed.`);
-        
-        // Force page refresh to show updated teams
-        window.location.reload();
       } catch (error) {
         alert('Failed to leave team: ' + error.message);
       }
@@ -261,27 +259,17 @@ function TeamSettings() {
 
   const handleChangeRole = async (newRole) => {
     try {
-      const localTeams = getLocalTeams();
-      const updatedTeams = localTeams.map(team => 
+      const storedTeams = getLocalTeams();
+      const updatedTeams = storedTeams.map(team => 
         team.id === showRoleModal.teamId 
           ? { ...team, role: newRole }
           : team
       );
       saveLocalTeams(updatedTeams);
+      setLocalTeams(updatedTeams); // Update local state immediately
       
-      // Force refresh of teams context
-      if (refreshTeams && typeof refreshTeams === 'function') {
-        await refreshTeams();
-      }
-      
-      // Force re-fetch of available teams to update UI
-      await fetchAvailableTeams();
-      
-      alert(`Your role in "${showRoleModal.teamName}" has been updated to ${ROLES[newRole].name}`);
       setShowRoleModal(null);
-      
-      // Force component re-render by updating local state
-      window.location.reload();
+      alert(`Your role in "${showRoleModal.teamName}" has been updated to ${ROLES[newRole].name}`);
     } catch (error) {
       alert('Failed to update role: ' + error.message);
     }
@@ -294,28 +282,19 @@ function TeamSettings() {
       if (confirmation === 'DELETE') {
         try {
           // Remove team from localStorage
-          const localTeams = getLocalTeams();
-          const updatedTeams = localTeams.filter(team => team.id !== teamId);
+          const storedTeams = getLocalTeams();
+          const updatedTeams = storedTeams.filter(team => team.id !== teamId);
           saveLocalTeams(updatedTeams);
-          
-          // Update teams context
-          if (refreshTeams && typeof refreshTeams === 'function') {
-            await refreshTeams();
-          }
+          setLocalTeams(updatedTeams); // Update local state immediately
           
           // If this was the current team, clear selection
           if (currentTeam?.id === teamId) {
             setCurrentTeam(null);
           }
           
-          // Close dropdown and refresh UI
           setShowDropdown(null);
           await fetchAvailableTeams();
-          
           alert(`Team "${teamName}" has been permanently deleted.`);
-          
-          // Force page refresh to show updated teams
-          window.location.reload();
         } catch (error) {
           alert('Failed to delete team: ' + error.message);
         }
@@ -339,7 +318,73 @@ function TeamSettings() {
     return ROLES[role?.toUpperCase()] || ROLES.DEVELOPER;
   };
 
-  // Show access denied for non-managers
+  // Show access message for team members (they can view but not create)
+  if (!isManager && userRole === 'MEMBER') {
+    return (
+      <div className="max-w-4xl mx-auto">
+        <div className="bg-blue-50 border border-blue-200 text-blue-700 px-6 py-4 rounded-lg mb-6">
+          <h3 className="text-lg font-semibold text-blue-800 mb-2">Team Member View</h3>
+          <p className="mb-2">You can view team information but cannot create or manage teams.</p>
+          <p className="text-sm text-blue-600">
+            Contact your manager to change roles or create teams.
+          </p>
+        </div>
+        
+        {/* Show teams in read-only mode */}
+        <div className="bg-white rounded-lg shadow p-6">
+          <h1 className="text-2xl font-bold mb-6">Your Teams</h1>
+          
+          {/* Current Company Display */}
+          {currentCompany && (
+            <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <h3 className="font-semibold text-blue-900">Current Company: {currentCompany.name}</h3>
+              <p className="text-sm text-blue-700">Code: {currentCompany.code}</p>
+            </div>
+          )}
+          
+          {/* Teams List - Read Only */}
+          <div className="mb-8">
+            {teams && teams.length > 0 ? (
+              <div className="space-y-3">
+                {teams.map(team => {
+                  const roleInfo = getRoleInfo(team.role);
+                  return (
+                    <div 
+                      key={team.id} 
+                      className="p-4 border rounded-lg border-gray-200 bg-gray-50"
+                    >
+                      <div className="flex items-center space-x-3">
+                        <UserGroupIcon className="w-5 h-5 text-gray-600" />
+                        <div className="flex-1">
+                          <h3 className="font-medium text-gray-900">{team.name}</h3>
+                          <div className="flex items-center space-x-2 mt-1">
+                            {getRoleIcon(team.role)}
+                            <span className={`text-sm font-medium ${roleInfo.color}`}>
+                              {roleInfo.name}
+                            </span>
+                            <span className="text-xs text-gray-500">
+                              • {roleInfo.description}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-gray-500">
+                <UserGroupIcon className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                <p>You haven't joined any teams yet.</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show access denied for viewers and other roles
   if (!isManager) {
     return (
       <div className="max-w-4xl mx-auto">
@@ -601,7 +646,7 @@ function TeamSettings() {
       {/* Role Change Modal */}
       {showRoleModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-96 max-w-90vw">
+                      <div className="bg-white rounded-lg p-6 w-96 max-w-[90vw]">
             <h3 className="text-lg font-semibold mb-4">Change Your Role in {showRoleModal.teamName}</h3>
             <div className="space-y-3">
               {Object.entries(ROLES).map(([key, role]) => {
@@ -642,7 +687,7 @@ function TeamSettings() {
       {/* Members Modal */}
       {showMembersModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-96 max-w-90vw">
+                      <div className="bg-white rounded-lg p-6 w-96 max-w-[90vw]">
             <h3 className="text-lg font-semibold mb-4">Members of {showMembersModal.team.name}</h3>
             <div className="space-y-3 max-h-64 overflow-y-auto">
               {showMembersModal.members.map(member => {
