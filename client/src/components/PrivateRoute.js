@@ -1,6 +1,7 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useCompany } from '../context/CompanyContext';
+import Navbar from './Navbar';
 
 function PrivateRoute() {
   const { currentUser } = useAuth();
@@ -31,7 +32,14 @@ function PrivateRoute() {
     return <Navigate to="/company/select" />;
   }
 
-  return <Outlet />;
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <Navbar />
+      <main className="py-8 px-4">
+        <Outlet />
+      </main>
+    </div>
+  );
 }
 
 export default PrivateRoute;
