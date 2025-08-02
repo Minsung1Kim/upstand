@@ -39,6 +39,7 @@ const SprintManagement = () => {
   // Load sprints from API when component mounts or team changes
   useEffect(() => {
     if (currentTeam) {
+      console.log('Fetching sprints for team:', currentTeam.id);
       fetchSprints();
     }
   }, [currentTeam]);
@@ -49,7 +50,9 @@ const SprintManagement = () => {
     
     setLoading(true);
     try {
+      console.log('Making API call to:', `/sprints?team_id=${currentTeam.id}`);
       const response = await api.get(`/sprints?team_id=${currentTeam.id}`);
+      console.log('API response:', response.data);
       const apiSprints = response.data.sprints || [];
       
       // Convert API sprints to local format with tasks and comments
@@ -65,6 +68,7 @@ const SprintManagement = () => {
         comments: sprint.comments || []
       }));
       
+      console.log('Formatted sprints:', formattedSprints);
       setSprints(formattedSprints);
       
       // Auto-select first sprint if available
@@ -73,6 +77,7 @@ const SprintManagement = () => {
       }
     } catch (error) {
       console.error('Failed to fetch sprints:', error);
+      console.error('Error details:', error.response?.data);
       setSprints([]);
     } finally {
       setLoading(false);
@@ -85,6 +90,14 @@ const SprintManagement = () => {
     
     setLoading(true);
     try {
+      console.log('Creating sprint with data:', {
+        name: newSprint.name,
+        startDate: newSprint.startDate,
+        endDate: newSprint.endDate,
+        team_id: currentTeam.id,
+        goals: newSprint.goals.filter(g => g.trim())
+      });
+      
       const response = await api.post('/sprints', {
         name: newSprint.name,
         startDate: newSprint.startDate,
@@ -92,6 +105,8 @@ const SprintManagement = () => {
         team_id: currentTeam.id,
         goals: newSprint.goals.filter(g => g.trim())
       });
+      
+      console.log('Create sprint response:', response.data);
       
       if (response.data.success) {
         const newSprintData = response.data.sprint;
@@ -109,8 +124,14 @@ const SprintManagement = () => {
           comments: []
         };
         
+        console.log('Formatted new sprint:', formattedSprint);
+        
         // Update local state immediately
-        setSprints(prev => [formattedSprint, ...prev]);
+        setSprints(prev => {
+          const updated = [formattedSprint, ...prev];
+          console.log('Updated sprints list:', updated);
+          return updated;
+        });
         setSelectedSprint(formattedSprint);
         
         // Reset form and close modal
@@ -119,9 +140,13 @@ const SprintManagement = () => {
         
         // Show success message
         alert('Sprint created successfully!');
+        
+        // Refetch sprints to ensure consistency
+        fetchSprints();
       }
     } catch (error) {
       console.error('Failed to create sprint:', error);
+      console.error('Create sprint error details:', error.response?.data);
       alert('Failed to create sprint: ' + (error.response?.data?.error || error.message));
     } finally {
       setLoading(false);
