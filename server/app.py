@@ -1598,6 +1598,10 @@ def get_user_behavior_analytics():
 def get_teams():
     """Get all teams for current user in the current company"""
     try:
+        # Check database connection
+        if not db:
+            return jsonify({'error': 'Database connection not available'}), 503
+            
         user_id = request.user_id
         company_id = request.company_id
         
@@ -1660,6 +1664,10 @@ def get_teams():
 def create_team():
     """Create a new team in the current company"""
     try:
+        # Check database connection
+        if not db:
+            return jsonify({'success': False, 'error': 'Database connection not available'}), 503
+            
         user_id = request.user_id
         user_email = request.user_email
         company_id = request.company_id
