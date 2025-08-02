@@ -94,11 +94,30 @@ const SprintManagement = () => {
       });
       
       if (response.data.success) {
-        // Refresh sprints from API
-        await fetchSprints();
+        const newSprintData = response.data.sprint;
         
+        // Format the new sprint for local state
+        const formattedSprint = {
+          id: newSprintData.id,
+          name: newSprintData.name,
+          status: newSprintData.status || 'planning',
+          startDate: newSprintData.start_date,
+          endDate: newSprintData.end_date,
+          progress: 0,
+          goals: newSprintData.goals || [],
+          tasks: [],
+          comments: []
+        };
+        
+        // Update local state immediately
+        setSprints(prev => [formattedSprint, ...prev]);
+        setSelectedSprint(formattedSprint);
+        
+        // Reset form and close modal
         setNewSprint({ name: '', startDate: '', endDate: '', goals: [''] });
         setShowCreateSprint(false);
+        
+        // Show success message
         alert('Sprint created successfully!');
       }
     } catch (error) {
@@ -333,6 +352,27 @@ const SprintManagement = () => {
             Create Sprint
           </button>
         </div>
+        
+        {/* Sprint Explanation for New Users */}
+        {sprints.length === 0 && (
+          <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <div className="flex items-start">
+              <div className="flex-shrink-0">
+                <FlagIcon className="w-5 h-5 text-blue-600 mt-0.5" />
+              </div>
+              <div className="ml-3">
+                <h3 className="text-sm font-medium text-blue-900">What is a Sprint?</h3>
+                <p className="mt-1 text-sm text-blue-700">
+                  A sprint is a short, time-boxed period (usually 1-4 weeks) where your team works on a specific set of tasks and goals. 
+                  It's the core building block of agile development that helps teams deliver working software iteratively.
+                </p>
+                <div className="mt-2 text-sm text-blue-600">
+                  <strong>Get started:</strong> Create your first sprint with clear goals, add tasks, and track your team's progress!
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Create Sprint Modal */}
@@ -340,6 +380,13 @@ const SprintManagement = () => {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 w-96 max-w-90vw max-h-90vh overflow-y-auto">
             <h3 className="text-lg font-semibold mb-4">Create New Sprint</h3>
+            
+            {/* Sprint Creation Help */}
+            <div className="mb-4 p-3 bg-gray-50 rounded-lg">
+              <p className="text-sm text-gray-600">
+                <strong>💡 Tip:</strong> A sprint typically lasts 1-4 weeks. Set clear, achievable goals and break them down into specific tasks once created.
+              </p>
+            </div>
             
             <div className="space-y-4">
               <div>
@@ -462,8 +509,14 @@ const SprintManagement = () => {
             {sprints.length === 0 ? (
               <div className="text-center py-8 text-gray-500">
                 <ClockIcon className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-                <p className="text-sm">No sprints yet.</p>
-                <p className="text-sm">Create your first sprint!</p>
+                <p className="text-sm font-medium">No sprints yet</p>
+                <p className="text-xs text-gray-400 mt-1">Create your first sprint to start organizing your team's work</p>
+                <button 
+                  onClick={() => setShowCreateSprint(true)}
+                  className="mt-3 text-sm text-blue-600 hover:text-blue-800 font-medium"
+                >
+                  + Create Sprint
+                </button>
               </div>
             ) : (
               <div className="space-y-3">
@@ -513,13 +566,28 @@ const SprintManagement = () => {
             <div className="bg-white rounded-lg shadow p-12 text-center">
               <ClockIcon className="w-16 h-16 mx-auto mb-4 text-gray-300" />
               <h2 className="text-xl font-semibold text-gray-900 mb-2">No Sprint Selected</h2>
-              <p className="text-gray-600 mb-6">Select a sprint from the sidebar or create a new one to get started.</p>
+              <p className="text-gray-600 mb-4">Choose a sprint from the sidebar to view details and manage tasks.</p>
+              
+              {sprints.length === 0 ? (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+                  <h3 className="text-sm font-medium text-blue-900 mb-2">Getting Started with Sprints</h3>
+                  <p className="text-sm text-blue-700 mb-3">
+                    Sprints help you organize work into manageable chunks. Each sprint has goals, tasks, and a timeline that keeps your team focused and productive.
+                  </p>
+                  <div className="text-sm text-blue-600">
+                    <strong>Sprint workflow:</strong> Create Sprint → Add Goals → Add Tasks → Track Progress → Review & Retrospect
+                  </div>
+                </div>
+              ) : (
+                <p className="text-gray-500 mb-6">Select an existing sprint to continue working.</p>
+              )}
+              
               <button 
                 onClick={() => setShowCreateSprint(true)}
                 className="flex items-center mx-auto px-6 py-3 bg-green-600 text-white rounded-md hover:bg-green-700"
               >
                 <PlusIcon className="w-5 h-5 mr-2" />
-                Create Your First Sprint
+                {sprints.length === 0 ? 'Create Your First Sprint' : 'Create New Sprint'}
               </button>
             </div>
           ) : (
