@@ -1,9 +1,101 @@
+import os
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from flask_socketio import SocketIO, emit, join_room, leave_room, disconnect
+from datetime import datetime, timedelta
+import firebase_admin
+from firebase_admin import credentials, firestore, auth
+from dotenv import load_dotenv
+import openai
+from functools import wraps
+import json
+import threading
+import time
+import traceback
+from collections import defaultdict, Counter
+import statistics
+
+# Load environment variables
+load_dotenv()
+
+# Initialize Flask app
+app = Flask(__name__)
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key-12345')
+
+# Hardcode allowed origins for testing
+allowed_origins = [
+    'http://localhost:3000',
+    'https://upstand-omega.vercel.app',
+    'https://upstand-git-main-minsung1kims-projects.vercel.app',
+    'https://upstand-cytbctct3-minsung1kims-projects.vercel.app/'
+]
+
+print(f"ALLOWED_ORIGINS env var: {os.getenv('ALLOWED_ORIGINS')}")
+print(f"Hardcoded allowed_origins: {allowed_origins}")
+
+CORS(app, 
+     origins=allowed_origins,
+     methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+     allow_headers=['Content-Type', 'Authorization', 'X-Company-ID', 'Access-Control-Allow-Origin'],
+     supports_credentials=True,
+     expose_headers=['Content-Type', 'Authorization'])
+
+socketio = SocketIO(app, 
+                   cors_allowed_origins=allowed_origins,
+                   logger=False, 
+                   engineio_logger=False,
+                   ping_timeout=60,
+                   ping_interval=25)
+
+# Firebase Admin SDK
+firebase_key = os.getenv('FIREBASE_SERVICE_ACCOUNT_KEY')
+if firebase_key:
+    try:
+        if firebase_key.startswith('{'):
+            firebase_config = json.loads(firebase_key)
+            cred = credentials.Certificate(firebase_config)
+        else:
+            cred = credentials.Certificate(firebase_key)
+        firebase_admin.initialize_app(cred)
+        db = firestore.client()
+        print("Firebase initialized successfully")
+    except Exception as e:
+        print(f"Firebase initialization error: {e}")
+        db = None
+else:
+    print("Warning: FIREBASE_SERVICE_ACCOUNT_KEY not found")
+    db = None
+
+openai.api_key = os.getenv('OPENAI_API_KEY')
+
+def require_auth(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        id_token = request.headers.get('Authorization')
+        if not id_token:
+            return jsonify({'error': 'No authorization token provided'}), 401
+        try:
+            if id_token.startswith('Bearer '):
+                id_token = id_token[7:]
+            decoded_token = auth.verify_id_token(id_token)
+            request.user_id = decoded_token['uid']
+            request.user_email = decoded_token.get('email', '')
+            request.company_id = request.headers.get('X-Company-ID', 'default')
+        except Exception as e:
+            return jsonify({'error': 'Invalid authorization token', 'details': str(e)}), 401
+        return f(*args, **kwargs)
+    return decorated_function
+
 # ===== SPRINT ROUTES =====
 
 @app.route('/api/sprints', methods=['GET'])
 @require_auth
 def get_sprints():
     try:
+        # Check database connection
+        if not db:
+            return jsonify({'error': 'Database connection not available'}), 503
+        
         company_id = request.company_id
         team_id = request.args.get('team_id')
         if not team_id:
@@ -563,6 +655,76 @@ def get_retrospectives():
         print(f"Error fetching retrospectives: {str(e)}")
         return jsonify({'success': False, 'error': 'Failed to fetch retrospectives'}), 500
 
+# Singular retrospective route (for frontend compatibility)
+@app.route('/api/retrospective', methods=['POST'])
+@require_auth
+def submit_retrospective_feedback():
+    """Submit individual retrospective feedback"""
+    try:
+        data = request.get_json()
+        company_id = request.company_id
+        team_id = data.get('team_id')
+        
+        if not team_id:
+            return jsonify({'error': 'team_id is required'}), 400
+        
+        track_user_action('submit_retrospective_feedback', {'team_id': team_id}, team_id)
+        
+        # Verify team belongs to current company
+        team_ref = db.collection('teams').document(team_id)
+        team_doc = team_ref.get()
+        if not team_doc.exists or team_doc.to_dict().get('company_id') != company_id:
+            return jsonify({'error': 'Team not found or access denied'}), 403
+        
+        feedback_data = {
+            'team_id': team_id,
+            'company_id': company_id,
+            'sprint_id': data.get('sprint_id', 'current'),
+            'feedback': data.get('feedback', ''),
+            'category': data.get('category', 'went_well'),
+            'anonymous': data.get('anonymous', True),
+            'created_by': request.user_id if not data.get('anonymous') else None,
+            'created_at': firestore.SERVER_TIMESTAMP
+        }
+        
+        # Basic AI analysis for the feedback
+        feedback_text = feedback_data['feedback']
+        category = feedback_data['category']
+        
+        analysis = {
+            'themes': [{
+                'title': f"{category.replace('_', ' ').title()} Feedback",
+                'sentiment': 'positive' if category == 'went_well' else 'neutral' if category == 'action_items' else 'negative',
+                'items': [feedback_text],
+                'actionable': category == 'action_items' or 'should' in feedback_text.lower()
+            }],
+            'overall_sentiment': f"Team member provided {category.replace('_', ' ')} feedback",
+            'suggested_actions': [f"Review and discuss: {feedback_text[:50]}..."] if len(feedback_text) > 50 else [f"Review: {feedback_text}"]
+        }
+        
+        # Save to Firestore
+        doc_ref = db.collection('retrospective_feedback').add(feedback_data)
+        
+        # Emit real-time update
+        socketio.emit('retrospective_feedback_added', {
+            'feedback_id': doc_ref[1].id,
+            'team_id': team_id,
+            'category': category,
+            'anonymous': feedback_data['anonymous']
+        }, room=f"team_{company_id}_{team_id}")
+        
+        return jsonify({
+            'success': True,
+            'feedback_id': doc_ref[1].id,
+            'analysis': analysis,
+            'message': 'Feedback submitted successfully'
+        })
+        
+    except Exception as e:
+        print(f"Error submitting retrospective feedback: {str(e)}")
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': 'Failed to submit feedback'}), 500
+
 # ===== HEALTH AND UTILITY ROUTES =====
 
 @app.route('/health', methods=['GET'])
@@ -600,20 +762,19 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
     host = '0.0.0.0'
     
-    print(f"🚀 Starting Upstand server on {host}:{port}")
-    print(f"🐛 Debug mode: {debug_mode}")
-    print(f"🔗 Allowed origins: {allowed_origins}")
-    print(f"🔥 Firebase status: {'Connected' if db else 'Not connected'}")
-    print(f"⚡ WebSocket support: {socketio.server.eio.async_mode}")
-    print(f"📊 Analytics: Enabled")
-    print(f"📈 Features: User tracking, Sprint velocity, Task completion rates, Blocker analysis, Productivity trends")
+    print(f"Starting Upstand server on {host}:{port}")
+    print(f"Debug mode: {debug_mode}")
+    print(f"Allowed origins: {allowed_origins}")
+    print(f"Firebase status: {'Connected' if db else 'Not connected'}")
+    print(f"WebSocket support: {socketio.server.eio.async_mode}")
+    print(f"Analytics: Enabled")
+    print(f"Features: User tracking, Sprint velocity, Task completion rates, Blocker analysis, Productivity trends")
     
     socketio.run(app, 
                 debug=debug_mode, 
                 port=port, 
                 host=host, 
                 allow_unsafe_werkzeug=True)
-import os
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit, join_room, leave_room, disconnect
@@ -645,8 +806,8 @@ allowed_origins = [
     'https://upstand-cytbctct3-minsung1kims-projects.vercel.app/'
 ]
 
-print(f"🔍 ALLOWED_ORIGINS env var: {os.getenv('ALLOWED_ORIGINS')}")
-print(f"🔍 Hardcoded allowed_origins: {allowed_origins}")
+print(f"ALLOWED_ORIGINS env var: {os.getenv('ALLOWED_ORIGINS')}")
+print(f"Hardcoded allowed_origins: {allowed_origins}")
 
 CORS(app, 
      origins=allowed_origins,
@@ -682,24 +843,6 @@ else:
     db = None
 
 openai.api_key = os.getenv('OPENAI_API_KEY')
-
-def require_auth(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        id_token = request.headers.get('Authorization')
-        if not id_token:
-            return jsonify({'error': 'No authorization token provided'}), 401
-        try:
-            if id_token.startswith('Bearer '):
-                id_token = id_token[7:]
-            decoded_token = auth.verify_id_token(id_token)
-            request.user_id = decoded_token['uid']
-            request.user_email = decoded_token.get('email', '')
-            request.company_id = request.headers.get('X-Company-ID', 'default')
-        except Exception as e:
-            return jsonify({'error': 'Invalid authorization token', 'details': str(e)}), 401
-        return f(*args, **kwargs)
-    return decorated_function
 
 # ===== ANALYTICS TRACKING MIDDLEWARE =====
 
