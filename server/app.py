@@ -102,10 +102,24 @@ def handle_preflight():
             print(f"OPTIONS handler error: {e}")
             return make_response('', 500)
 
-# Firebase Admin SDK
-# Initialize Firestore using the init_firestore function
+# Initialize Firebase Admin SDK first
+firebase_key = os.getenv('FIREBASE_SERVICE_ACCOUNT_KEY')
+if firebase_key:
+    try:
+        if firebase_key.startswith('{'):
+            firebase_config = json.loads(firebase_key)
+            cred = credentials.Certificate(firebase_config)
+        else:
+            cred = credentials.Certificate(firebase_key)
+        firebase_admin.initialize_app(cred)
+        print("✅ Firebase Admin SDK initialized successfully")
+    except Exception as e:
+        print(f"❌ Firebase Admin SDK initialization error: {e}")
+
+# Initialize Firestore
 db = None
 firestore_initialized = init_firestore()
+
 openai.api_key = os.getenv('OPENAI_API_KEY')
 
 def require_auth(f):
