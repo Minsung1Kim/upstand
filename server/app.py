@@ -1,5 +1,5 @@
 import os
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit, join_room, leave_room, disconnect
 from datetime import datetime, timedelta
@@ -52,12 +52,17 @@ socketio = SocketIO(app,
 @app.before_request
 def handle_preflight():
     if request.method == "OPTIONS":
-        response = make_response()
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization,X-Company-ID")
-        response.headers.add('Access-Control-Allow-Methods', "GET,PUT,POST,DELETE,OPTIONS")
-        response.headers.add('Access-Control-Allow-Credentials', "true")
-        return response
+        try:
+            response = make_response('', 200)
+            response.headers.add("Access-Control-Allow-Origin", "https://upstand-omega.vercel.app")
+            response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization,X-Company-ID")
+            response.headers.add('Access-Control-Allow-Methods', "GET,PUT,POST,DELETE,OPTIONS")
+            response.headers.add('Access-Control-Allow-Credentials', "true")
+            response.headers.add('Access-Control-Max-Age', "3600")
+            return response
+        except Exception as e:
+            print(f"OPTIONS handler error: {e}")
+            return make_response('', 500)
 
 # Firebase Admin SDK
 firebase_key = os.getenv('FIREBASE_SERVICE_ACCOUNT_KEY')
@@ -787,7 +792,7 @@ if __name__ == '__main__':
                 port=port, 
                 host=host, 
                 allow_unsafe_werkzeug=True)
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit, join_room, leave_room, disconnect
 from datetime import datetime, timedelta
@@ -840,12 +845,17 @@ socketio = SocketIO(app,
 @app.before_request
 def handle_preflight():
     if request.method == "OPTIONS":
-        response = make_response()
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization,X-Company-ID")
-        response.headers.add('Access-Control-Allow-Methods', "GET,PUT,POST,DELETE,OPTIONS")
-        response.headers.add('Access-Control-Allow-Credentials', "true")
-        return response
+        try:
+            response = make_response('', 200)
+            response.headers.add("Access-Control-Allow-Origin", "https://upstand-omega.vercel.app")
+            response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization,X-Company-ID")
+            response.headers.add('Access-Control-Allow-Methods', "GET,PUT,POST,DELETE,OPTIONS")
+            response.headers.add('Access-Control-Allow-Credentials', "true")
+            response.headers.add('Access-Control-Max-Age', "3600")
+            return response
+        except Exception as e:
+            print(f"OPTIONS handler error: {e}")
+            return make_response('', 500)
 
 # Firebase Admin SDK
 firebase_key = os.getenv('FIREBASE_SERVICE_ACCOUNT_KEY')
