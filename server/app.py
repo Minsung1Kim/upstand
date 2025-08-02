@@ -1274,7 +1274,7 @@ def get_analytics_overview():
             'blocker_analysis': blocker_data,
             'productivity_trends': productivity_data,
             'user_activity': activity_summary
-        };
+        }
         
         return jsonify({
             'success': True,
