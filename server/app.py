@@ -38,7 +38,8 @@ CORS(app,
      methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
      allow_headers=['Content-Type', 'Authorization', 'X-Company-ID', 'Access-Control-Allow-Origin'],
      supports_credentials=True,
-     expose_headers=['Content-Type', 'Authorization'])
+     expose_headers=['Content-Type', 'Authorization'],
+     max_age=3600)
 
 socketio = SocketIO(app, 
                    cors_allowed_origins=allowed_origins,
@@ -46,6 +47,17 @@ socketio = SocketIO(app,
                    engineio_logger=False,
                    ping_timeout=60,
                    ping_interval=25)
+
+# Add explicit OPTIONS handler for CORS preflight
+@app.before_request
+def handle_preflight():
+    if request.method == "OPTIONS":
+        response = make_response()
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization,X-Company-ID")
+        response.headers.add('Access-Control-Allow-Methods', "GET,PUT,POST,DELETE,OPTIONS")
+        response.headers.add('Access-Control-Allow-Credentials', "true")
+        return response
 
 # Firebase Admin SDK
 firebase_key = os.getenv('FIREBASE_SERVICE_ACCOUNT_KEY')
@@ -814,7 +826,8 @@ CORS(app,
      methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
      allow_headers=['Content-Type', 'Authorization', 'X-Company-ID', 'Access-Control-Allow-Origin'],
      supports_credentials=True,
-     expose_headers=['Content-Type', 'Authorization'])
+     expose_headers=['Content-Type', 'Authorization'],
+     max_age=3600)
 
 socketio = SocketIO(app, 
                    cors_allowed_origins=allowed_origins,
@@ -822,6 +835,17 @@ socketio = SocketIO(app,
                    engineio_logger=False,
                    ping_timeout=60,
                    ping_interval=25)
+
+# Add explicit OPTIONS handler for CORS preflight
+@app.before_request
+def handle_preflight():
+    if request.method == "OPTIONS":
+        response = make_response()
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization,X-Company-ID")
+        response.headers.add('Access-Control-Allow-Methods', "GET,PUT,POST,DELETE,OPTIONS")
+        response.headers.add('Access-Control-Allow-Credentials', "true")
+        return response
 
 # Firebase Admin SDK
 firebase_key = os.getenv('FIREBASE_SERVICE_ACCOUNT_KEY')
