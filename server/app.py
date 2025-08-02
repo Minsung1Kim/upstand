@@ -14,6 +14,8 @@ import time
 import traceback
 from collections import defaultdict, Counter
 import statistics
+from google.oauth2 import service_account
+import json
 
 # Load environment variables
 load_dotenv()
@@ -48,6 +50,40 @@ socketio = SocketIO(app,
                    ping_timeout=60,
                    ping_interval=25)
 
+def init_firestore():
+    global db
+    try:
+        # Try to get service account key from environment variable
+        service_account_key = os.getenv('FIREBASE_SERVICE_ACCOUNT_KEY')
+        
+        if service_account_key:
+            # If it's a file path
+            if service_account_key.startswith('./') or service_account_key.startswith('/'):
+                credentials_obj = service_account.Credentials.from_service_account_file(service_account_key)
+            else:
+                # If it's JSON string
+                service_account_info = json.loads(service_account_key)
+                credentials_obj = service_account.Credentials.from_service_account_info(service_account_info)
+            
+            db = firestore.Client(credentials=credentials_obj)
+            print("✅ Firestore initialized successfully with service account")
+        else:
+            # Try application default credentials (for Railway/production)
+            db = firestore.Client()
+            print("✅ Firestore initialized with default credentials")
+            
+        # Test the connection
+        test_collection = db.collection('test')
+        test_doc = test_collection.document('connection_test')
+        test_doc.set({'test': True, 'timestamp': datetime.utcnow()})
+        print("✅ Firestore connection test successful")
+        
+        return True
+    except Exception as e:
+        print(f"❌ Failed to initialize Firestore: {str(e)}")
+        traceback.print_exc()
+        return False
+
 # Add explicit OPTIONS handler for CORS preflight
 @app.before_request
 def handle_preflight():
@@ -67,24 +103,9 @@ def handle_preflight():
             return make_response('', 500)
 
 # Firebase Admin SDK
-firebase_key = os.getenv('FIREBASE_SERVICE_ACCOUNT_KEY')
-if firebase_key:
-    try:
-        if firebase_key.startswith('{'):
-            firebase_config = json.loads(firebase_key)
-            cred = credentials.Certificate(firebase_config)
-        else:
-            cred = credentials.Certificate(firebase_key)
-        firebase_admin.initialize_app(cred)
-        db = firestore.client()
-        print("Firebase initialized successfully")
-    except Exception as e:
-        print(f"Firebase initialization error: {e}")
-        db = None
-else:
-    print("Warning: FIREBASE_SERVICE_ACCOUNT_KEY not found")
-    db = None
-
+# Initialize Firestore using the init_firestore function
+db = None
+firestore_initialized = init_firestore()
 openai.api_key = os.getenv('OPENAI_API_KEY')
 
 def require_auth(f):
@@ -717,18 +738,25 @@ def get_sprints():
 @require_auth
 def create_sprint():
     try:
-        # Check database connection
+        # Check database connection first
+        global db
         if not db:
-            print("Database connection not available")
-            return jsonify({'success': False, 'error': 'Database connection not available'}), 503
+            print("❌ Database connection not available, reinitializing...")
+            firestore_initialized = init_firestore()
+            if not firestore_initialized:
+                return jsonify({'success': False, 'error': 'Database connection failed'}), 503
             
         data = request.json
         company_id = request.company_id
         team_id = data.get('team_id')
         
-        print(f"Creating sprint for team_id: {team_id}, company_id: {company_id}")
+        print(f"🚀 Creating sprint for team_id: {team_id}, company_id: {company_id}")
+        print(f"📝 Received data: {data}")
         
-        track_user_action('create_sprint', {'team_id': team_id}, team_id)
+        # Validate required fields
+        if not all([team_id, data.get('name'), data.get('startDate'), data.get('endDate')]):
+            print("❌ Missing required fields")
+            return jsonify({'success': False, 'error': 'Missing required fields: team_id, name, startDate, endDate'}), 400
         
         sprint_data = {
             'team_id': team_id,
@@ -742,16 +770,27 @@ def create_sprint():
             'status': 'active'
         }
         
-        print(f"Sprint data: {sprint_data}")
+        print(f"💾 Sprint data to save: {sprint_data}")
         
-        if not all([sprint_data['team_id'], sprint_data['name'], sprint_data['start_date'], sprint_data['end_date']]):
-            print("Missing required fields")
-            return jsonify({'error': 'Missing required fields'}), 400
-        
-        print("Adding sprint to database...")
-        doc_ref = db.collection('sprints').add(sprint_data)
-        sprint_data['id'] = doc_ref[1].id
-        print(f"Sprint created with id: {sprint_data['id']}")
+        # Try to save to Firestore with better error handling
+        try:
+            print("📤 Adding sprint to Firestore...")
+            doc_ref = db.collection('sprints').add(sprint_data)
+            sprint_id = doc_ref[1].id
+            sprint_data['id'] = sprint_id
+            print(f"✅ Sprint created successfully with id: {sprint_id}")
+            
+            # Verify the document was actually saved
+            saved_doc = db.collection('sprints').document(sprint_id).get()
+            if saved_doc.exists:
+                print(f"✅ Verified sprint exists in database: {saved_doc.to_dict()}")
+            else:
+                print(f"❌ Sprint not found in database after creation!")
+                
+        except Exception as firestore_error:
+            print(f"❌ Firestore error: {str(firestore_error)}")
+            traceback.print_exc()
+            return jsonify({'success': False, 'error': f'Database save failed: {str(firestore_error)}'}), 500
         
         # Initialize analytics
         sprint_data['analytics'] = {
