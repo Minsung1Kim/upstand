@@ -65,6 +65,30 @@ function Dashboard() {
     }
   }, [currentTeam?.id]); // More specific dependency
 
+  // Add effect to refresh when navigating back to dashboard
+  useEffect(() => {
+    const handleFocus = () => {
+      if (currentTeam?.id) {
+        fetchDashboardData();
+      }
+    };
+    
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [currentTeam?.id]);
+
+  // Refresh data when component becomes visible again
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden && currentTeam?.id) {
+        fetchDashboardData();
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [currentTeam?.id]);
+
   const fetchDashboardData = async () => {
     try {
       console.log('Fetching dashboard data for team:', currentTeam?.id);
