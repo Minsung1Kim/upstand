@@ -43,7 +43,7 @@ const SprintManagement = () => {
     }
   }, [currentTeam]);
 
-  // Fetch sprints from API
+  // Fetch sprints from API with tasks and comments
   const fetchSprints = async () => {
     if (!currentTeam) return;
     
@@ -52,22 +52,17 @@ const SprintManagement = () => {
       const response = await api.get(`/sprints?team_id=${currentTeam.id}`);
       const apiSprints = response.data.sprints || [];
       
-      // Convert API sprints to local format
+      // Convert API sprints to local format with tasks and comments
       const formattedSprints = apiSprints.map(sprint => ({
         id: sprint.id,
         name: sprint.name,
         status: sprint.status || 'planning',
         startDate: sprint.start_date,
         endDate: sprint.end_date,
-        progress: 0, // Calculate this based on tasks
+        progress: sprint.tasks ? Math.round((sprint.tasks.filter(t => t.status === 'completed').length / sprint.tasks.length) * 100) || 0 : 0,
         goals: sprint.goals || [],
-        tasks: [], // Tasks would need separate API call
-        comments: [{
-          id: Date.now(),
-          author: 'System',
-          text: 'Sprint loaded from database',
-          time: 'just now'
-        }]
+        tasks: sprint.tasks || [],
+        comments: sprint.comments || []
       }));
       
       setSprints(formattedSprints);
@@ -114,6 +109,140 @@ const SprintManagement = () => {
     }
   };
 
+  // Add comment with API persistence
+  const addComment = async () => {
+    if (!newComment.trim() || !selectedSprint) return;
+    
+    try {
+      const response = await api.post(`/sprints/${selectedSprint.id}/comments`, {
+        author: 'Minsung Kim',
+        text: newComment
+      });
+      
+      if (response.data.success) {
+        const newCommentData = response.data.comment;
+        
+        // Update local state
+        const updatedSprints = sprints.map(sprint => 
+          sprint.id === selectedSprint.id 
+            ? { ...sprint, comments: [newCommentData, ...sprint.comments] }
+            : sprint
+        );
+
+        setSprints(updatedSprints);
+        setSelectedSprint(prev => ({ ...prev, comments: [newCommentData, ...prev.comments] }));
+        setNewComment('');
+      }
+    } catch (error) {
+      console.error('Failed to add comment:', error);
+      alert('Failed to add comment: ' + (error.response?.data?.error || error.message));
+    }
+  };
+
+  // Add task with API persistence
+  const addTask = async () => {
+    if (!newTask.title.trim() || !selectedSprint) return;
+
+    try {
+      const response = await api.post('/tasks', {
+        sprint_id: selectedSprint.id,
+        title: newTask.title,
+        assignee: newTask.assignee,
+        status: 'todo',
+        estimate: parseInt(newTask.estimate)
+      });
+      
+      if (response.data.success) {
+        const newTaskData = response.data.task;
+        
+        // Update local state
+        const updatedSprints = sprints.map(sprint =>
+          sprint.id === selectedSprint.id
+            ? { ...sprint, tasks: [...sprint.tasks, newTaskData] }
+            : sprint
+        );
+
+        setSprints(updatedSprints);
+        setSelectedSprint(prev => ({ ...prev, tasks: [...prev.tasks, newTaskData] }));
+        setNewTask({ title: '', assignee: 'Unassigned', estimate: 1 });
+        setShowAddTask(false);
+      }
+    } catch (error) {
+      console.error('Failed to add task:', error);
+      alert('Failed to add task: ' + (error.response?.data?.error || error.message));
+    }
+  };
+
+  // Update task status with API persistence
+  const updateTaskStatus = async (taskId, newStatus) => {
+    try {
+      const response = await api.put(`/tasks/${taskId}`, {
+        status: newStatus
+      });
+      
+      if (response.data.success) {
+        const updatedTask = response.data.task;
+        
+        // Update local state
+        const updateTasks = (tasks) => 
+          tasks.map(task => task.id === taskId ? updatedTask : task);
+
+        const updatedSprints = sprints.map(sprint =>
+          sprint.id === selectedSprint.id
+            ? { ...sprint, tasks: updateTasks(sprint.tasks) }
+            : sprint
+        );
+
+        setSprints(updatedSprints);
+        setSelectedSprint(prev => ({ ...prev, tasks: updateTasks(prev.tasks) }));
+      }
+    } catch (error) {
+      console.error('Failed to update task status:', error);
+      alert('Failed to update task: ' + (error.response?.data?.error || error.message));
+    }
+  };
+
+  // Reassign task with API persistence
+  const reassignTask = async (taskId, newAssignee) => {
+    try {
+      const response = await api.put(`/tasks/${taskId}`, {
+        assignee: newAssignee
+      });
+      
+      if (response.data.success) {
+        const updatedTask = response.data.task;
+        
+        // Update local state
+        const updateTasks = (tasks) => 
+          tasks.map(task => task.id === taskId ? updatedTask : task);
+
+        const updatedSprints = sprints.map(sprint =>
+          sprint.id === selectedSprint.id
+            ? { ...sprint, tasks: updateTasks(sprint.tasks) }
+            : sprint
+        );
+
+        setSprints(updatedSprints);
+        setSelectedSprint(prev => ({ ...prev, tasks: updateTasks(prev.tasks) }));
+        setShowReassignModal(null);
+      }
+    } catch (error) {
+      console.error('Failed to reassign task:', error);
+      alert('Failed to reassign task: ' + (error.response?.data?.error || error.message));
+    }
+  };
+
+  // Start sprint
+  const startSprint = (sprintId) => {
+    const updatedSprints = sprints.map(sprint =>
+      sprint.id === sprintId ? { ...sprint, status: 'active' } : sprint
+    );
+    setSprints(updatedSprints);
+    if (selectedSprint?.id === sprintId) {
+      setSelectedSprint(prev => ({ ...prev, status: 'active' }));
+    }
+  };
+
   // Calculate team workload
   const getTeamWorkload = () => {
     if (!selectedSprint) return { assigned: 0, unassigned: 100, totalHours: 0 };
@@ -133,94 +262,6 @@ const SprintManagement = () => {
       unassigned: Math.round((unassignedWork / totalWork) * 100),
       totalHours: totalWork
     };
-  };
-
-  // Add comment
-  const addComment = () => {
-    if (!newComment.trim() || !selectedSprint) return;
-    
-    const comment = {
-      id: Date.now(),
-      author: 'Minsung Kim',
-      text: newComment,
-      time: 'just now'
-    };
-
-    const updatedSprints = sprints.map(sprint => 
-      sprint.id === selectedSprint.id 
-        ? { ...sprint, comments: [comment, ...sprint.comments] }
-        : sprint
-    );
-
-    setSprints(updatedSprints);
-    setSelectedSprint(prev => ({ ...prev, comments: [comment, ...prev.comments] }));
-    setNewComment('');
-  };
-
-  // Add task
-  const addTask = () => {
-    if (!newTask.title.trim() || !selectedSprint) return;
-
-    const task = {
-      id: Date.now(),
-      title: newTask.title,
-      assignee: newTask.assignee,
-      status: 'todo',
-      estimate: parseInt(newTask.estimate)
-    };
-
-    const updatedSprints = sprints.map(sprint =>
-      sprint.id === selectedSprint.id
-        ? { ...sprint, tasks: [...sprint.tasks, task] }
-        : sprint
-    );
-
-    setSprints(updatedSprints);
-    setSelectedSprint(prev => ({ ...prev, tasks: [...prev.tasks, task] }));
-    setNewTask({ title: '', assignee: 'Unassigned', estimate: 1 });
-    setShowAddTask(false);
-  };
-
-  // Update task status
-  const updateTaskStatus = (taskId, newStatus) => {
-    const updateTasks = (tasks) => 
-      tasks.map(task => task.id === taskId ? { ...task, status: newStatus } : task);
-
-    const updatedSprints = sprints.map(sprint =>
-      sprint.id === selectedSprint.id
-        ? { ...sprint, tasks: updateTasks(sprint.tasks) }
-        : sprint
-    );
-
-    setSprints(updatedSprints);
-    setSelectedSprint(prev => ({ ...prev, tasks: updateTasks(prev.tasks) }));
-  };
-
-  // Reassign task
-  const reassignTask = (taskId, newAssignee) => {
-    const updateTasks = (tasks) => 
-      tasks.map(task => task.id === taskId ? { ...task, assignee: newAssignee } : task);
-
-    const updatedSprints = sprints.map(sprint =>
-      sprint.id === selectedSprint.id
-        ? { ...sprint, tasks: updateTasks(sprint.tasks) }
-        : sprint
-    );
-
-    setSprints(updatedSprints);
-    setSelectedSprint(prev => ({ ...prev, tasks: updateTasks(prev.tasks) }));
-    setShowReassignModal(null);
-  };
-
-  // Start sprint
-  const startSprint = (sprintId) => {
-    const updatedSprints = sprints.map(sprint =>
-      sprint.id === sprintId ? { ...sprint, status: 'active' } : sprint
-    );
-    setSprints(updatedSprints);
-    if (selectedSprint?.id === sprintId) {
-      setSelectedSprint(prev => ({ ...prev, status: 'active' }));
-    }
   };
 
   const getStatusColor = (status) => {
@@ -266,6 +307,15 @@ const SprintManagement = () => {
       goals: newGoals.length > 0 ? newGoals : ['']
     });
   };
+
+  if (loading && sprints.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        <p className="ml-4 text-gray-600">Loading sprints...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto p-6">
@@ -363,7 +413,8 @@ const SprintManagement = () => {
               </button>
               <button
                 onClick={createSprint}
-                className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
+                disabled={!newSprint.name.trim()}
+                className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Create Sprint
               </button>
@@ -377,16 +428,13 @@ const SprintManagement = () => {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 w-80">
             <h3 className="text-lg font-semibold mb-4">Reassign Task</h3>
-            <p className="text-sm text-gray-600 mb-4">Task: {showReassignModal.title}</p>
             
             <div className="space-y-3">
               {teamMembers.map(member => (
                 <button
                   key={member}
-                  onClick={() => reassignTask(showReassignModal.id, member)}
-                  className={`w-full text-left p-3 rounded-lg border hover:bg-gray-50 ${
-                    showReassignModal.assignee === member ? 'border-blue-500 bg-blue-50' : 'border-gray-200'
-                  }`}
+                  onClick={() => reassignTask(showReassignModal, member)}
+                  className="w-full text-left p-3 rounded-lg border hover:bg-gray-50"
                 >
                   {member}
                 </button>
@@ -511,20 +559,22 @@ const SprintManagement = () => {
                 </div>
 
                 {/* Sprint Goals */}
-                <div className="mb-4">
-                  <h3 className="font-semibold mb-2 flex items-center">
-                    <FlagIcon className="w-4 h-4 mr-2" />
-                    Sprint Goals
-                  </h3>
-                  <ul className="space-y-1">
-                    {selectedSprint.goals.map((goal, index) => (
-                      <li key={index} className="flex items-center text-sm">
-                        <CheckCircleIcon className="w-4 h-4 mr-2 text-green-500" />
-                        {goal}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
+                {selectedSprint.goals && selectedSprint.goals.length > 0 && (
+                  <div className="mb-4">
+                    <h3 className="font-semibold mb-2 flex items-center">
+                      <FlagIcon className="w-4 h-4 mr-2" />
+                      Sprint Goals
+                    </h3>
+                    <ul className="space-y-1">
+                      {selectedSprint.goals.map((goal, index) => (
+                        <li key={index} className="flex items-center text-sm">
+                          <CheckCircleIcon className="w-4 h-4 mr-2 text-green-500" />
+                          {goal}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
 
                 {/* Progress Bar */}
                 {selectedSprint.status === 'active' && (
@@ -549,10 +599,6 @@ const SprintManagement = () => {
                   <ChartBarIcon className="w-5 h-5 mr-2" />
                   Team Workload
                 </h3>
-                <p className="text-gray-600 mb-4">
-                  Monitor the capacity of your team. 
-                  <span className="text-blue-600 ml-1">Reassign work items to get the right balance</span>
-                </p>
                 
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
@@ -638,7 +684,8 @@ const SprintManagement = () => {
                     <div className="flex space-x-2">
                       <button 
                         onClick={addTask}
-                        className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm"
+                        disabled={!newTask.title.trim()}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
                       >
                         Add Task
                       </button>
@@ -656,33 +703,52 @@ const SprintManagement = () => {
                   {selectedSprint.tasks.map(task => (
                     <div key={task.id} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg">
                       <div className="flex items-center space-x-3">
-                        <input 
-                          type="checkbox" 
-                          checked={task.status === 'completed'}
-                          onChange={(e) => updateTaskStatus(task.id, e.target.checked ? 'completed' : 'todo')}
-                          className="w-4 h-4"
-                        />
-                        <div>
-                          <div className={`font-medium ${task.status === 'completed' ? 'line-through text-gray-500' : ''}`}>
-                            {task.title}
+                        <button
+                          onClick={() => updateTaskStatus(task.id, 
+                            task.status === 'todo' ? 'in-progress' : 
+                            task.status === 'in-progress' ? 'completed' : 'todo'
+                          )}
+                          className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                            task.status === 'completed' ? 'bg-green-500 border-green-500' :
+                            task.status === 'in-progress' ? 'bg-yellow-500 border-yellow-500' :
+                            'border-gray-300 hover:border-blue-500'
+                          }`}
+                        >
+                          {task.status === 'completed' && (
+                            <CheckCircleIcon className="w-3 h-3 text-white" />
+                          )}
+                        </button>
+                        
+                        <div className="flex-1">
+                          <div className="flex items-center space-x-2">
+                            <span className={`font-medium ${task.status === 'completed' ? 'line-through text-gray-500' : 'text-gray-900'}`}>
+                              {task.title}
+                            </span>
+                            <span className={`px-2 py-1 text-xs rounded-full ${getTaskStatusColor(task.status)}`}>
+                              {task.status.replace('-', ' ')}
+                            </span>
                           </div>
-                          <div className="text-sm text-gray-600">
-                            {task.assignee} • {task.estimate}h
+                          <div className="flex items-center space-x-4 text-sm text-gray-500 mt-1">
+                            <span className="flex items-center">
+                              <UserIcon className="w-3 h-3 mr-1" />
+                              {task.assignee}
+                            </span>
+                            <span className="flex items-center">
+                              <ClockIcon className="w-3 h-3 mr-1" />
+                              {task.estimate}h
+                            </span>
                           </div>
                         </div>
                       </div>
+                      
                       <div className="flex items-center space-x-2">
-                        <span className={`px-2 py-1 rounded-full text-xs ${getTaskStatusColor(task.status)}`}>
-                          {task.status.replace('-', ' ')}
-                        </span>
-                        <button 
-                          onClick={() => setShowReassignModal(task)}
-                          className="text-gray-400 hover:text-gray-600 p-1"
-                          title="Reassign task"
+                        <button
+                          onClick={() => setShowReassignModal(task.id)}
+                          className="text-gray-400 hover:text-gray-600"
                         >
-                          <ArrowPathIcon className="w-4 h-4" />
+                          <UserIcon className="w-4 h-4" />
                         </button>
-                        <button 
+                        <button
                           onClick={() => updateTaskStatus(task.id, 
                             task.status === 'todo' ? 'in-progress' : 
                             task.status === 'in-progress' ? 'completed' : 'todo'
