@@ -1728,10 +1728,43 @@ def get_dashboard():
         # Get quick analytics for dashboard
         velocity_data = calculate_sprint_velocity(team_id, company_id, 3)
         completion_data = calculate_completion_rates(team_id, company_id, 7)
+        # Get active sprint info
+        active_sprint = None
+        try:
+            sprints_ref = db.collection('sprints')
+            active_sprints_query = sprints_ref.where('team_id', '==', team_id)\
+                             .where('company_id', '==', company_id)\
+                             .where('status', '==', 'active')\
+                             .limit(1)
+            active_sprints = list(active_sprints_query.stream())
+            
+            if active_sprints:
+                sprint_data = active_sprints[0].to_dict()
+                sprint_data['id'] = active_sprints[0].id
+                
+                # Get tasks for this sprint to calculate progress
+                tasks_ref = db.collection('tasks')
+                tasks_query = tasks_ref.where('sprint_id', '==', sprint_data['id'])
+                tasks = list(tasks_query.stream())
+                
+                total_tasks = len(tasks)
+                completed_tasks = len([t for t in tasks if t.to_dict().get('status') == 'done'])
+                
+                active_sprint = {
+                    'id': sprint_data['id'],
+                    'name': sprint_data.get('name', 'Unnamed Sprint'),
+                    'total_tasks': total_tasks,
+                    'completed_tasks': completed_tasks,
+                    'progress': round((completed_tasks / total_tasks * 100), 1) if total_tasks > 0 else 0
+                }
+        except Exception as e:
+            print(f"Error fetching active sprint: {e}")
+            active_sprint = None
         
         dashboard_data = {
             'standup_count': standup_count,
             'team_summary': team_summary,
+            'active_sprint': active_sprint,
             'sentiment_analysis': {
                 'distribution': sentiment_data,
                 'percentages': sentiment_percentages,
@@ -1762,6 +1795,45 @@ def get_dashboard():
             'success': False,
             'error': 'Failed to fetch dashboard data'
         }), 500
+
+@app.route('/api/standups', methods=['GET'])
+@require_auth
+def get_standups():
+    """Get standups for a team"""
+    try:
+        company_id = request.company_id
+        team_id = request.args.get('team_id')
+        
+        if not team_id:
+            return jsonify({'error': 'team_id is required'}), 400
+        
+        track_user_action('view_standups', {'team_id': team_id}, team_id)
+        
+        # Get last 7 days of standups
+        end_date = datetime.utcnow()
+        start_date = end_date - timedelta(days=7)
+        
+        standups_ref = db.collection('standups')
+        query = standups_ref.where('team_id', '==', team_id)\
+                          .where('company_id', '==', company_id)\
+                          .where('date', '>=', start_date.strftime('%Y-%m-%d'))\
+                          .order_by('date', direction=firestore.Query.DESCENDING)
+        
+        standups = list(query.stream())
+        
+        standup_list = []
+        for standup in standups:
+            standup_data = standup.to_dict()
+            standup_data['id'] = standup.id
+            standup_data['time'] = 'recently'  # Simple time display
+            standup_list.append(standup_data)
+        
+        return jsonify({'success': True, 'standups': standup_list})
+        
+    except Exception as e:
+        print(f"Error fetching standups: {str(e)}")
+        return jsonify({'success': False, 'error': 'Failed to fetch standups'}), 500
+
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
