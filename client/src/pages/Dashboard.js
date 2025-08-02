@@ -98,7 +98,7 @@ function Dashboard() {
       const response = await api.get(`/dashboard?team_id=${currentTeam.id}`);
       console.log('Dashboard data received:', response.data);
       
-      setDashboardData(response.data);
+      setDashboardData(response.data.dashboard);
     } catch (err) {
       console.error('Dashboard fetch error:', err);
       setError(err.response?.data?.message || 'Failed to load dashboard data');
