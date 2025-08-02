@@ -54,7 +54,9 @@ def handle_preflight():
     if request.method == "OPTIONS":
         try:
             response = make_response('', 200)
-            response.headers.add("Access-Control-Allow-Origin", "https://upstand-omega.vercel.app")
+            origin = request.headers.get('Origin')
+            if origin in allowed_origins:
+                response.headers.add("Access-Control-Allow-Origin", origin)
             response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization,X-Company-ID")
             response.headers.add('Access-Control-Allow-Methods', "GET,PUT,POST,DELETE,OPTIONS")
             response.headers.add('Access-Control-Allow-Credentials', "true")
@@ -864,7 +866,9 @@ def handle_preflight():
     if request.method == "OPTIONS":
         try:
             response = make_response('', 200)
-            response.headers.add("Access-Control-Allow-Origin", "https://upstand-omega.vercel.app")
+            origin = request.headers.get('Origin')
+            if origin in allowed_origins:
+                response.headers.add("Access-Control-Allow-Origin", origin)
             response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization,X-Company-ID")
             response.headers.add('Access-Control-Allow-Methods', "GET,PUT,POST,DELETE,OPTIONS")
             response.headers.add('Access-Control-Allow-Credentials', "true")
