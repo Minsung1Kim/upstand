@@ -748,6 +748,23 @@ def submit_retrospective_feedback():
 def railway_health():
     return jsonify({'status': 'healthy', 'service': 'upstand-backend'})
 
+@app.route('/debug/routes', methods=['GET'])
+def list_routes():
+    """Debug endpoint to list all available routes"""
+    routes = []
+    for rule in app.url_map.iter_rules():
+        routes.append({
+            'endpoint': rule.endpoint,
+            'methods': list(rule.methods),
+            'rule': str(rule)
+        })
+    return jsonify({'routes': routes, 'total': len(routes)})
+
+@app.route('/api/test', methods=['GET'])
+def test_endpoint():
+    """Simple test endpoint to verify API is working"""
+    return jsonify({'message': 'API is working', 'timestamp': datetime.utcnow().isoformat()})
+
 @app.route('/cors-test', methods=['GET', 'OPTIONS'])
 def cors_test():
     return jsonify({
