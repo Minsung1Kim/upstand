@@ -779,6 +779,7 @@ def create_sprint():
             'start_date': data.get('startDate'),
             'end_date': data.get('endDate'),
             'goals': data.get('goals', []),
+            'description': data.get('description', ''),
             'created_by': request.user_id,
             'created_at': datetime.utcnow().isoformat(),
             'status': 'active'
@@ -786,7 +787,7 @@ def create_sprint():
         
         print(f"💾 Sprint data to save: {sprint_data}")
         
-        # Try to save to Firestore with better error handling
+        # Save to Firestore
         try:
             print("📤 Adding sprint to Firestore...")
             doc_ref = db.collection('sprints').add(sprint_data)
@@ -814,6 +815,16 @@ def create_sprint():
             'task_counts': {'todo': 0, 'in_progress': 0, 'done': 0},
             'total_tasks': 0
         }
+        
+        # Broadcast real-time update
+        try:
+            socketio.emit('sprint_created', {
+                'sprint': sprint_data,
+                'team_id': team_id
+            }, room=f"team_{company_id}_{team_id}")
+        except Exception as socket_error:
+            print(f"Socket emit error: {socket_error}")
+            # Don't fail the request if socket fails
         
         return jsonify({'success': True, 'sprint': sprint_data})
     except Exception as e:
@@ -992,13 +1003,7 @@ def complete_sprint(sprint_id):
         return jsonify({
             'success': True, 
             'message': 'Sprint completed successfully',
-            'final_analytics': {
-                'total_story_points': total_story_points,
-                'completed_story_points': completed_story_points,
-                'completion_percentage': round(completion_percentage, 1),
-                'velocity': completed_story_points,
-                'total_tasks': len(tasks)
-            }
+            'final_analytics': update_data['final_analytics']
         })
         
     except Exception as e:
@@ -1231,81 +1236,217 @@ def create_retrospective():
     """Create a retrospective session"""
     try:
         data = request.get_json()
-        company_id = request.company_id
+        new_role = data.get('role')
+        user_id = request.user_id
         team_id = data.get('team_id')
-        
+
         if not team_id:
-            return jsonify({'error': 'team_id is required'}), 400
+            return jsonify({
+                'success': False,
+                'error': 'team_id is required'
+            }), 400
+
+        if not new_role or new_role not in ['OWNER', 'MANAGER', 'DEVELOPER', 'VIEWER']:
+            return jsonify({
+                'success': False,
+                'error': 'Invalid role'
+            }), 400
         
-        track_user_action('create_retrospective', {'team_id': team_id}, team_id)
-        
-        # Verify team belongs to current company
+        # Get team document
         team_ref = db.collection('teams').document(team_id)
         team_doc = team_ref.get()
-        if not team_doc.exists or team_doc.to_dict().get('company_id') != company_id:
-            return jsonify({'error': 'Team not found or access denied'}), 403
         
-        retro_data = {
-            'team_id': team_id,
-            'company_id': company_id,
-            'sprint_name': data.get('sprint_name', ''),
-            'what_went_well': data.get('what_went_well', []),
-            'what_could_improve': data.get('what_could_improve', []),
-            'action_items': data.get('action_items', []),
-            'created_by': request.user_id,
-            'created_at': firestore.SERVER_TIMESTAMP
-        }
+        if not team_doc.exists:
+            return jsonify({
+                'success': False,
+                'error': 'Team not found'
+            }), 404
         
-        # Enhanced AI analysis of feedback
-        all_feedback = (
-            retro_data['what_went_well'] + 
-            retro_data['what_could_improve']
-        )
+        team_data = team_doc.to_dict()
         
-        if all_feedback:
-            feedback_text = '\n'.join(all_feedback)
-            
-            # Analyze sentiment of feedback
-            positive_feedback = retro_data['what_went_well']
-            improvement_feedback = retro_data['what_could_improve']
-            
-            retro_data['ai_analysis'] = {
-                'feedback_count': len(all_feedback),
-                'positive_items': len(positive_feedback),
-                'improvement_items': len(improvement_feedback),
-                'action_items_count': len(retro_data['action_items']),
-                'summary': f"Team provided {len(all_feedback)} feedback items for retrospective",
-                'sentiment_balance': {
-                    'positive_ratio': len(positive_feedback) / len(all_feedback) if all_feedback else 0,
-                    'improvement_ratio': len(improvement_feedback) / len(all_feedback) if all_feedback else 0
-                },
-                'key_themes': {
-                    'positive': positive_feedback[:3] if positive_feedback else [],
-                    'improvements': improvement_feedback[:3] if improvement_feedback else []
-                }
-            }
+        # Check if user is a member
+        if user_id not in team_data.get('members', []):
+            return jsonify({
+                'success': False,
+                'error': 'You are not a member of this team'
+            }), 403
         
-        # Save to Firestore
-        doc_ref = db.collection('retrospectives').add(retro_data)
+        # Update user's role
+        member_roles = team_data.get('member_roles', {})
+        member_roles[user_id] = new_role
         
-        # Emit real-time update
-        socketio.emit('retrospective_created', {
-            'retrospective_id': doc_ref[1].id,
-            'team_id': team_id,
-            'summary': retro_data.get('ai_analysis', {}).get('summary', 'New retrospective created')
-        }, room=f"team_{company_id}_{team_id}")
+        team_ref.update({
+            'member_roles': member_roles,
+            'updated_at': datetime.utcnow().isoformat()
+        })
         
         return jsonify({
             'success': True,
-            'retrospective_id': doc_ref[1].id,
-            'ai_analysis': retro_data.get('ai_analysis', {}),
-            'message': 'Retrospective created successfully'
+            'message': f'Role updated to {new_role}'
         })
         
     except Exception as e:
-        print(f"Error creating retrospective: {str(e)}")
-        traceback.print_exc()
-        return jsonify({'success': False, 'error': str(e)}), 500
+        print(f"Error updating role: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to update role'
+        }), 500
+
+@app.route('/api/teams/<team_id>/join', methods=['POST'])
+@require_auth
+def join_team(team_id):
+    """Join a team"""
+    try:
+        user_id = request.user_id
+        
+        # Get team document
+        team_ref = db.collection('teams').document(team_id)
+        team_doc = team_ref.get()
+        
+        if not team_doc.exists:
+            return jsonify({
+                'success': False,
+                'error': 'Team not found'
+            }), 404
+        
+        team_data = team_doc.to_dict()
+        
+        # Check if user is already a member
+        if user_id in team_data.get('members', []):
+            return jsonify({
+                'success': False,
+                'error': 'You are already a member of this team'
+            }), 400
+        
+        # Add user to team
+        members = team_data.get('members', [])
+        members.append(user_id)
+        
+        member_roles = team_data.get('member_roles', {})
+        member_roles[user_id] = 'DEVELOPER'  # Default role
+        
+        member_joined = team_data.get('member_joined', {})
+        member_joined[user_id] = datetime.utcnow().isoformat()
+        
+        team_ref.update({
+            'members': members,
+            'member_roles': member_roles,
+            'member_joined': member_joined,
+            'updated_at': datetime.utcnow().isoformat()
+        })
+        
+        return jsonify({
+            'success': True,
+            'message': 'Successfully joined team'
+        })
+        
+    except Exception as e:
+        print(f"Error joining team: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to join team'
+        }), 500
+
+@app.route('/api/teams/<team_id>/leave', methods=['POST'])
+@require_auth
+def leave_team(team_id):
+    """Leave a team"""
+    try:
+        user_id = request.user_id
+        
+        # Get team document
+        team_ref = db.collection('teams').document(team_id)
+        team_doc = team_ref.get()
+        
+        if not team_doc.exists:
+            return jsonify({
+                'success': False,
+                'error': 'Team not found'
+            }), 404
+        
+        team_data = team_doc.to_dict()
+        
+        # Check if user is a member
+        if user_id not in team_data.get('members', []):
+            return jsonify({
+                'success': False,
+                'error': 'You are not a member of this team'
+            }), 400
+        
+        # Check if user is owner
+        if team_data.get('owner_id') == user_id:
+            return jsonify({
+                'success': False,
+                'error': 'Team owner cannot leave team. Transfer ownership or delete the team.'
+            }), 400
+        
+        # Remove user from team
+        members = team_data.get('members', [])
+        members.remove(user_id)
+        
+        member_roles = team_data.get('member_roles', {})
+        if user_id in member_roles:
+            del member_roles[user_id]
+        
+        member_joined = team_data.get('member_joined', {})
+        if user_id in member_joined:
+            del member_joined[user_id]
+        
+        team_ref.update({
+            'members': members,
+            'member_roles': member_roles,
+            'member_joined': member_joined,
+            'updated_at': datetime.utcnow().isoformat()
+        })
+        
+        return jsonify({
+            'success': True,
+            'message': 'Successfully left team'
+        })
+        
+    except Exception as e:
+        print(f"Error leaving team: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to leave team'
+        }), 500
+
+# ===== ERROR HANDLERS =====
+
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({'error': 'Endpoint not found'}), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    return jsonify({'error': 'Internal server error'}), 500
+
+@app.errorhandler(403)
+def forbidden(error):
+    return jsonify({'error': 'Access forbidden'}), 403
+
+@app.errorhandler(401)
+def unauthorized(error):
+    return jsonify({'error': 'Unauthorized access'}), 401
+
+if __name__ == '__main__':
+    debug_mode = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
+    port = int(os.getenv('PORT', 5000))
+    host = '0.0.0.0'
+    
+    print(f"Starting Upstand server on {host}:{port}")
+    print(f"Debug mode: {debug_mode}")
+    print(f"Allowed origins: {allowed_origins}")
+    print(f"Firebase status: {'Connected' if db else 'Not connected'}")
+    print(f"WebSocket support: {socketio.server.eio.async_mode}")
+    print(f"Analytics: Enabled")
+    print(f"Features: User tracking, Sprint velocity, Task completion rates, Blocker analysis, Productivity trends")
+    
+    socketio.run(app, 
+                debug=debug_mode, 
+                port=port, 
+                host=host, 
+                allow_unsafe_werkzeug=True)
 
 @app.route('/api/retrospectives', methods=['GET'])
 @require_auth
@@ -1728,6 +1869,7 @@ def get_dashboard():
         # Get quick analytics for dashboard
         velocity_data = calculate_sprint_velocity(team_id, company_id, 3)
         completion_data = calculate_completion_rates(team_id, company_id, 7)
+        
         # Get recent standups (last 7 days)
         recent_standups = []
         try:
@@ -1743,7 +1885,9 @@ def get_dashboard():
 
             for standup in standups:
                 standup_data = standup.to_dict()
+                standup_data['id'] = standup.id  # Add document ID
                 recent_standups.append({
+                    'id': standup.id,
                     'user_email': standup_data.get('user_email', 'Unknown'),
                     'date': standup_data.get('date', ''),
                     'today': standup_data.get('today', '')[:100] + ('...' if len(standup_data.get('today', '')) > 100 else ''),
@@ -1783,6 +1927,7 @@ def get_dashboard():
                 })
         except Exception as e:
             print(f"Error fetching recent retrospectives: {e}")
+            
         # Get active sprint info
         active_sprint = None
         try:
@@ -1890,7 +2035,6 @@ def get_standups():
     except Exception as e:
         print(f"Error fetching standups: {str(e)}")
         return jsonify({'success': False, 'error': 'Failed to fetch standups'}), 500
-
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
@@ -2149,207 +2293,10 @@ def update_user_role(team_id):
     """Update user's role in a team"""
     try:
         user_id = request.user_id
-        data = request.get_json()
-        new_role = data.get('role')
-        
-        if not new_role or new_role not in ['OWNER', 'MANAGER', 'DEVELOPER', 'VIEWER']:
-            return jsonify({
-                'success': False,
-                'error': 'Invalid role'
-            }), 400
-        
-        # Get team document
-        team_ref = db.collection('teams').document(team_id)
-        team_doc = team_ref.get()
-        
-        if not team_doc.exists:
-            return jsonify({
-                'success': False,
-                'error': 'Team not found'
-            }), 404
-        
-        team_data = team_doc.to_dict()
-        
-        # Check if user is a member
-        if user_id not in team_data.get('members', []):
-            return jsonify({
-                'success': False,
-                'error': 'You are not a member of this team'
-            }), 403
-        
-        # Update user's role
-        member_roles = team_data.get('member_roles', {})
-        member_roles[user_id] = new_role
-        
-        team_ref.update({
-            'member_roles': member_roles,
-            'updated_at': datetime.utcnow().isoformat()
-        })
-        
-        return jsonify({
-            'success': True,
-            'message': f'Role updated to {new_role}'
-        })
-        
+        data = request.get_json
     except Exception as e:
-        print(f"Error updating role: {str(e)}")
+        print(f"Error updating user role: {str(e)}")
         return jsonify({
             'success': False,
-            'error': 'Failed to update role'
+            'error': 'Failed to update user role'
         }), 500
-
-@app.route('/api/teams/<team_id>/join', methods=['POST'])
-@require_auth
-def join_team(team_id):
-    """Join a team"""
-    try:
-        user_id = request.user_id
-        
-        # Get team document
-        team_ref = db.collection('teams').document(team_id)
-        team_doc = team_ref.get()
-        
-        if not team_doc.exists:
-            return jsonify({
-                'success': False,
-                'error': 'Team not found'
-            }), 404
-        
-        team_data = team_doc.to_dict()
-        
-        # Check if user is already a member
-        if user_id in team_data.get('members', []):
-            return jsonify({
-                'success': False,
-                'error': 'You are already a member of this team'
-            }), 400
-        
-        # Add user to team
-        members = team_data.get('members', [])
-        members.append(user_id)
-        
-        member_roles = team_data.get('member_roles', {})
-        member_roles[user_id] = 'DEVELOPER'  # Default role
-        
-        member_joined = team_data.get('member_joined', {})
-        member_joined[user_id] = datetime.utcnow().isoformat()
-        
-        team_ref.update({
-            'members': members,
-            'member_roles': member_roles,
-            'member_joined': member_joined,
-            'updated_at': datetime.utcnow().isoformat()
-        })
-        
-        return jsonify({
-            'success': True,
-            'message': 'Successfully joined team'
-        })
-        
-    except Exception as e:
-        print(f"Error joining team: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': 'Failed to join team'
-        }), 500
-
-@app.route('/api/teams/<team_id>/leave', methods=['POST'])
-@require_auth
-def leave_team(team_id):
-    """Leave a team"""
-    try:
-        user_id = request.user_id
-        
-        # Get team document
-        team_ref = db.collection('teams').document(team_id)
-        team_doc = team_ref.get()
-        
-        if not team_doc.exists:
-            return jsonify({
-                'success': False,
-                'error': 'Team not found'
-            }), 404
-        
-        team_data = team_doc.to_dict()
-        
-        # Check if user is a member
-        if user_id not in team_data.get('members', []):
-            return jsonify({
-                'success': False,
-                'error': 'You are not a member of this team'
-            }), 400
-        
-        # Check if user is owner
-        if team_data.get('owner_id') == user_id:
-            return jsonify({
-                'success': False,
-                'error': 'Team owner cannot leave team. Transfer ownership or delete the team.'
-            }), 400
-        
-        # Remove user from team
-        members = team_data.get('members', [])
-        members.remove(user_id)
-        
-        member_roles = team_data.get('member_roles', {})
-        if user_id in member_roles:
-            del member_roles[user_id]
-        
-        member_joined = team_data.get('member_joined', {})
-        if user_id in member_joined:
-            del member_joined[user_id]
-        
-        team_ref.update({
-            'members': members,
-            'member_roles': member_roles,
-            'member_joined': member_joined,
-            'updated_at': datetime.utcnow().isoformat()
-        })
-        
-        return jsonify({
-            'success': True,
-            'message': 'Successfully left team'
-        })
-        
-    except Exception as e:
-        print(f"Error leaving team: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': 'Failed to leave team'
-        }), 500
-
-# ===== ERROR HANDLERS =====
-
-@app.errorhandler(404)
-def not_found(error):
-    return jsonify({'error': 'Endpoint not found'}), 404
-
-@app.errorhandler(500)
-def internal_error(error):
-    return jsonify({'error': 'Internal server error'}), 500
-
-@app.errorhandler(403)
-def forbidden(error):
-    return jsonify({'error': 'Access forbidden'}), 403
-
-@app.errorhandler(401)
-def unauthorized(error):
-    return jsonify({'error': 'Unauthorized access'}), 401
-
-if __name__ == '__main__':
-    debug_mode = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
-    port = int(os.getenv('PORT', 5000))
-    host = '0.0.0.0'
-    
-    print(f"Starting Upstand server on {host}:{port}")
-    print(f"Debug mode: {debug_mode}")
-    print(f"Allowed origins: {allowed_origins}")
-    print(f"Firebase status: {'Connected' if db else 'Not connected'}")
-    print(f"WebSocket support: {socketio.server.eio.async_mode}")
-    print(f"Analytics: Enabled")
-    print(f"Features: User tracking, Sprint velocity, Task completion rates, Blocker analysis, Productivity trends")
-    
-    socketio.run(app, 
-                debug=debug_mode, 
-                port=port, 
-                host=host, 
-                allow_unsafe_werkzeug=True)
