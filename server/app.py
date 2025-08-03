@@ -1817,7 +1817,7 @@ def get_dashboard():
             active_sprint = None
         
         dashboard_data = {
-            'standup_count': standup_count,
+            'standup_count': standup_count, 
             'team_summary': team_summary,
             'active_sprint': active_sprint,
             'recent_standups': recent_standups,
