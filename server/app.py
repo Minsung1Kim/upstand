@@ -1728,6 +1728,61 @@ def get_dashboard():
         # Get quick analytics for dashboard
         velocity_data = calculate_sprint_velocity(team_id, company_id, 3)
         completion_data = calculate_completion_rates(team_id, company_id, 7)
+        # Get recent standups (last 7 days)
+        recent_standups = []
+        try:
+            end_date = datetime.utcnow()
+            start_date = end_date - timedelta(days=7)
+            standups_ref = db.collection('standups')
+            standups_query = standups_ref.where('team_id', '==', team_id)\
+                        .where('company_id', '==', company_id)\
+                        .where('date', '>=', start_date.strftime('%Y-%m-%d'))\
+                        .order_by('date', direction=firestore.Query.DESCENDING)\
+                        .limit(10)
+            standups = list(standups_query.stream())
+
+            for standup in standups:
+                standup_data = standup.to_dict()
+                recent_standups.append({
+                    'user_email': standup_data.get('user_email', 'Unknown'),
+                    'date': standup_data.get('date', ''),
+                    'today': standup_data.get('today', '')[:100] + ('...' if len(standup_data.get('today', '')) > 100 else ''),
+                    'blockers': standup_data.get('blockers', '')
+                })
+        except Exception as e:
+            print(f"Error fetching recent standups: {e}")
+
+        # Get recent retrospectives (last 30 days)
+        recent_retros = []
+        try:
+            retros_ref = db.collection('retrospectives')
+            retros_query = retros_ref.where('team_id', '==', team_id)\
+                        .where('company_id', '==', company_id)\
+                        .order_by('created_at', direction=firestore.Query.DESCENDING)\
+                        .limit(5)
+            retros = list(retros_query.stream())
+
+            for retro in retros:
+                retro_data = retro.to_dict()
+                # Convert timestamp to string
+                created_at = 'Recently'
+                if retro_data.get('created_at'):
+                    try:
+                        if hasattr(retro_data['created_at'], 'timestamp'):
+                            created_at = datetime.fromtimestamp(retro_data['created_at'].timestamp()).strftime('%Y-%m-%d')
+                        else:
+                            created_at = str(retro_data['created_at'])[:10]
+                    except:
+                        created_at = 'Recently'
+
+                recent_retros.append({
+                    'sprint_name': retro_data.get('sprint_name', ''),
+                    'what_went_well': retro_data.get('what_went_well', []),
+                    'what_could_improve': retro_data.get('what_could_improve', []),
+                    'created_at': created_at
+                })
+        except Exception as e:
+            print(f"Error fetching recent retrospectives: {e}")
         # Get active sprint info
         active_sprint = None
         try:
@@ -1765,6 +1820,8 @@ def get_dashboard():
             'standup_count': standup_count,
             'team_summary': team_summary,
             'active_sprint': active_sprint,
+            'recent_standups': recent_standups,
+            'recent_retros': recent_retros,
             'sentiment_analysis': {
                 'distribution': sentiment_data,
                 'percentages': sentiment_percentages,

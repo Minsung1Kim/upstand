@@ -361,6 +361,53 @@ function Dashboard() {
           </div>
         </div>
       )}
+      {/* Recent Standups */}
+      <div className="bg-white rounded-lg shadow p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">Recent Team Standups</h2>
+        {dashboardData?.recent_standups && dashboardData.recent_standups.length > 0 ? (
+          <div className="space-y-3">
+            {dashboardData.recent_standups.slice(0, 5).map((standup, index) => (
+              <div key={index} className="flex items-start space-x-3 p-3 bg-gray-50 rounded-lg">
+                <UserIcon className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-sm font-medium text-gray-900">{standup.user_email}</p>
+                    <span className="text-xs text-gray-500">{standup.date}</span>
+                  </div>
+                  <p className="text-sm text-gray-600 truncate">{standup.today}</p>
+                  {standup.blockers && (
+                    <p className="text-xs text-red-600 mt-1">🚫 Has blockers</p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-gray-500">No recent standups submitted.</p>
+        )}
+      </div>
+
+      {/* Recent Retrospectives */}
+      <div className="bg-white rounded-lg shadow p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">Recent Retrospectives</h2>
+        {dashboardData?.recent_retros && dashboardData.recent_retros.length > 0 ? (
+          <div className="space-y-3">
+            {dashboardData.recent_retros.slice(0, 3).map((retro, index) => (
+              <div key={index} className="p-3 bg-gray-50 rounded-lg">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-sm font-medium text-gray-900">{retro.sprint_name || 'General Retro'}</p>
+                  <span className="text-xs text-gray-500">{retro.created_at}</span>
+                </div>
+                <p className="text-sm text-gray-600">
+                  {retro.what_went_well?.length || 0} positives, {retro.what_could_improve?.length || 0} improvements
+                </p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-gray-500">No recent retrospectives.</p>
+        )}
+      </div>
     </div>
   );
 }
