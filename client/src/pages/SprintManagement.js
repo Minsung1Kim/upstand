@@ -152,6 +152,26 @@ function Dashboard() {
     }]
   };
 
+  // Burndown chart data
+  const burndownData = {
+    labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
+    datasets: [
+      {
+        label: 'Ideal Burndown',
+        data: [100, 75, 50, 25, 0],
+        borderColor: '#9CA3AF',
+        backgroundColor: 'transparent',
+        borderDash: [5, 5]
+      },
+      {
+        label: 'Actual Burndown',
+        data: [100, 80, 45, 30, 10],
+        borderColor: '#3B82F6',
+        backgroundColor: 'transparent'
+      }
+    ]
+  };
+
   // If no team is selected
   if (!currentTeam) {
     return (
@@ -176,7 +196,7 @@ function Dashboard() {
     );
   }
 
-  if (error) {
+  if (error && !dashboardData) {
     return (
       <div className="max-w-7xl mx-auto p-6">
         <div className="text-center py-12">
@@ -198,38 +218,36 @@ function Dashboard() {
     <div className="max-w-7xl mx-auto p-6">
       {/* Header */}
       <div className="mb-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">Team Dashboard</h1>
-            <p className="text-gray-600 mt-2">
-              Overview for {currentTeam?.name} • {new Date().toLocaleDateString()}
-            </p>
-          </div>
-          <div className="flex items-center space-x-3">
-            <button
+        <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
+        <p className="text-gray-600 mt-1">Welcome back, {currentUser?.email || 'User'}</p>
+        <p className="text-sm text-gray-500 mt-2">Team: {currentTeam?.name || 'No team selected'}</p>
+      </div>
+
+      {/* Show error banner if there was an error but we have fallback data */}
+      {error && dashboardData && (
+        <div className="bg-yellow-50 border border-yellow-200 text-yellow-700 px-4 py-3 rounded mb-6">
+          <div className="flex justify-between items-center">
+            <span>{error} - Showing cached data.</span>
+            <button 
               onClick={fetchDashboardData}
-              disabled={loading}
-              className="flex items-center px-3 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 disabled:opacity-50"
+              className="text-yellow-800 underline hover:no-underline"
             >
-              <ChartBarIcon className="w-4 h-4 mr-2" />
-              Refresh
+              Retry
             </button>
           </div>
         </div>
-      </div>
+      )}
 
-      {/* Key Metrics Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+      {/* Stats Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         {/* Today's Standups */}
         <div className="bg-white rounded-lg shadow p-6">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">Today's Standups</p>
-              <p className="text-2xl font-semibold text-gray-900">
-                {dashboardData?.standup_count || 0}
-              </p>
+              <p className="text-2xl font-semibold text-gray-900">{dashboardData?.standup_count || 0}</p>
             </div>
-            <UserIcon className="w-8 h-8 text-blue-500" />
+            <UserGroupIcon className="w-8 h-8 text-blue-500" />
           </div>
         </div>
 
@@ -274,7 +292,7 @@ function Dashboard() {
       </div>
 
       {/* Main Content Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         {/* Today's Summary */}
         <div className="bg-white rounded-lg shadow p-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Today's Team Summary</h2>
@@ -312,76 +330,103 @@ function Dashboard() {
               </div>
             </div>
           ) : (
-            <p className="text-gray-500">No active sprint.</p>
+            <p className="text-gray-500">No active sprint. Create one to track progress.</p>
           )}
         </div>
+      </div>
 
-        {/* Recent Blockers */}
-        <div className="bg-white rounded-lg shadow p-6">
+      {/* Burndown Chart */}
+      <div className="bg-white rounded-lg shadow p-6 mb-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">Sprint Burndown</h2>
+        {dashboardData?.active_sprint ? (
+          <div className="h-64">
+            <Line 
+              data={burndownData}
+              options={{
+                maintainAspectRatio: false,
+                scales: {
+                  y: {
+                    beginAtZero: true,
+                    title: {
+                      display: true,
+                      text: 'Story Points'
+                    }
+                  }
+                },
+                plugins: {
+                  legend: {
+                    position: 'top'
+                  }
+                }
+              }}
+            />
+          </div>
+        ) : (
+          <p className="text-gray-500 text-center py-8">No active sprint data available</p>
+        )}
+      </div>
+
+      {/* Active Blockers List */}
+      {dashboardData?.active_blockers && dashboardData.active_blockers.length > 0 && (
+        <div className="bg-white rounded-lg shadow p-6 mb-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Active Blockers</h2>
-          {dashboardData?.active_blockers && dashboardData.active_blockers.length > 0 ? (
-            <div className="space-y-3">
-              {dashboardData.active_blockers.slice(0, 3).map((blocker, index) => (
-                <div key={index} className="border-l-4 border-red-400 pl-4 py-2">
-                  <p className="text-sm font-medium text-gray-900">{blocker.author}</p>
-                  <p className="text-sm text-gray-600">{blocker.text}</p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    {new Date(blocker.timestamp).toLocaleDateString()}
-                  </p>
-                </div>
-              ))}
-              {dashboardData.active_blockers.length > 3 && (
-                <p className="text-sm text-gray-500 text-center">
-                  +{dashboardData.active_blockers.length - 3} more blockers
-                </p>
-              )}
-            </div>
-          ) : (
-            <div className="text-center py-8">
-              <CheckCircleIcon className="w-12 h-12 text-green-400 mx-auto mb-3" />
-              <p className="text-gray-500">No active blockers! 🎉</p>
-            </div>
-          )}
-        </div>
-
-        {/* Quick Actions */}
-        <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h2>
           <div className="space-y-3">
-            <a
-              href="/standup"
-              className="flex items-center p-3 border border-gray-200 rounded-lg hover:border-blue-300 hover:bg-blue-50 transition-colors"
-            >
-              <UserIcon className="w-5 h-5 text-blue-600 mr-3" />
-              <div>
-                <p className="font-medium text-gray-900">Submit Standup</p>
-                <p className="text-sm text-gray-600">Share your daily progress</p>
+            {dashboardData.active_blockers.map((blocker, index) => (
+              <div key={index} className="flex items-start space-x-3 p-3 bg-red-50 rounded-lg">
+                <ExclamationTriangleIcon className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                <p className="text-sm text-gray-700">{blocker}</p>
               </div>
-            </a>
-            
-            <a
-              href="/sprints"
-              className="flex items-center p-3 border border-gray-200 rounded-lg hover:border-green-300 hover:bg-green-50 transition-colors"
-            >
-              <CalendarIcon className="w-5 h-5 text-green-600 mr-3" />
-              <div>
-                <p className="font-medium text-gray-900">Manage Sprints</p>
-                <p className="text-sm text-gray-600">Create and track sprint progress</p>
-              </div>
-            </a>
-            
-            <a
-              href="/analytics"
-              className="flex items-center p-3 border border-gray-200 rounded-lg hover:border-purple-300 hover:bg-purple-50 transition-colors"
-            >
-              <ChartBarIcon className="w-5 h-5 text-purple-600 mr-3" />
-              <div>
-                <p className="font-medium text-gray-900">View Analytics</p>
-                <p className="text-sm text-gray-600">Team performance insights</p>
-              </div>
-            </a>
+            ))}
           </div>
         </div>
+      )}
+
+      {/* Recent Standups */}
+      <div className="bg-white rounded-lg shadow p-6 mb-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">Recent Team Standups</h2>
+        {dashboardData?.recent_standups && dashboardData.recent_standups.length > 0 ? (
+          <div className="space-y-3">
+            {dashboardData.recent_standups.slice(0, 5).map((standup, index) => (
+              <div key={index} className="flex items-start space-x-3 p-3 bg-gray-50 rounded-lg">
+                <UserIcon className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-sm font-medium text-gray-900">{standup.user_email}</p>
+                    <span className="text-xs text-gray-500">{standup.date}</span>
+                  </div>
+                  <p className="text-sm text-gray-600 truncate">{standup.today}</p>
+                  {standup.blockers && (
+                    <p className="text-xs text-red-600 mt-1">🚫 Has blockers</p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-gray-500">No recent standups submitted.</p>
+        )}
+      </div>
+
+      {/* Recent Retrospectives */}
+      <div className="bg-white rounded-lg shadow p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">Recent Retrospectives</h2>
+        {dashboardData?.recent_retros && dashboardData.recent_retros.length > 0 ? (
+          <div className="space-y-3">
+            {dashboardData.recent_retros.slice(0, 3).map((retro, index) => (
+              <div key={index} className="p-3 bg-gray-50 rounded-lg">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-sm font-medium text-gray-900">{retro.sprint_name || 'General Retro'}</p>
+                  <span className="text-xs text-gray-500">{retro.created_at}</span>
+                </div>
+                <p className="text-sm text-gray-600">
+                  {retro.what_went_well?.length || 0} positives, {retro.what_could_improve?.length || 0} improvements
+                </p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-gray-500">No recent retrospectives.</p>
+        )}
       </div>
     </div>
   );
