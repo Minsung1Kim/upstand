@@ -1362,7 +1362,7 @@ def add_sprint_comment(sprint_id):
         comment_data = {
             'sprint_id': sprint_id,
             'company_id': company_id,
-            'author': data.get('author', 'Anonymous'),
+            'author': data.get('author', 'Anonymous'), 
             'text': data.get('text'),
             'created_by': request.user_id,
             'created_at': datetime.utcnow().isoformat()
