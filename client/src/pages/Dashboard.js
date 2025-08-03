@@ -27,7 +27,8 @@ import {
   ChartBarIcon,
   FaceSmileIcon,
   FaceFrownIcon,
-  CheckCircleIcon
+  CheckCircleIcon,
+  UserIcon  // Added UserIcon import here
 } from '@heroicons/react/24/outline';
 
 // Register ChartJS components
@@ -141,92 +142,96 @@ function Dashboard() {
   const sprintProgressData = {
     labels: ['Completed', 'Remaining'],
     datasets: [{
-      data: dashboardData?.active_sprint ? [
-        dashboardData.active_sprint.completed_tasks || 0,
-        Math.max(0, (dashboardData.active_sprint.total_tasks || 0) - (dashboardData.active_sprint.completed_tasks || 0))
-      ] : [0, 1], // Show 100% remaining when no data
-      backgroundColor: ['#10b981', '#e5e7eb'],
+      data: dashboardData?.active_sprint ?
+        [
+          dashboardData.active_sprint.completed_tasks || 0,
+          (dashboardData.active_sprint.total_tasks || 0) - (dashboardData.active_sprint.completed_tasks || 0)
+        ] : [0, 1],
+      backgroundColor: ['#10B981', '#E5E7EB'],
       borderWidth: 0
     }]
   };
 
-  // Burndown chart data (mock data for demo)
+  // Burndown chart data
   const burndownData = {
-    labels: ['Day 1', 'Day 2', 'Day 3', 'Day 4', 'Day 5', 'Today'],
-    datasets: [{
-      label: 'Ideal',
-      data: [100, 80, 60, 40, 20, 0],
-      borderColor: '#6b7280',
-      borderDash: [5, 5],
-      tension: 0.1,
-      fill: false
-    }, {
-      label: 'Actual',
-      data: [100, 85, 75, 65, 45, 35],
-      borderColor: '#3b82f6',
-      backgroundColor: 'rgba(59, 130, 246, 0.1)',
-      tension: 0.3,
-      fill: true
-    }]
+    labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
+    datasets: [
+      {
+        label: 'Ideal Burndown',
+        data: [100, 75, 50, 25, 0],
+        borderColor: '#9CA3AF',
+        backgroundColor: 'transparent',
+        borderDash: [5, 5]
+      },
+      {
+        label: 'Actual Burndown',
+        data: [100, 80, 45, 30, 10],
+        borderColor: '#3B82F6',
+        backgroundColor: 'transparent'
+      }
+    ]
   };
+
+  // If no team is selected
+  if (!currentTeam) {
+    return (
+      <div className="max-w-7xl mx-auto p-6">
+        <div className="text-center py-12">
+          <UserGroupIcon className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+          <h1 className="text-2xl font-bold text-gray-900 mb-4">Welcome to Upstand</h1>
+          <p className="text-gray-600 mb-6">Select a team from the sidebar to view your dashboard</p>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-        <p className="ml-4 text-gray-600">Loading dashboard...</p>
+      <div className="max-w-7xl mx-auto p-6">
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+          <p className="ml-4 text-gray-600">Loading dashboard...</p>
+        </div>
       </div>
     );
   }
 
   if (error && !dashboardData) {
     return (
-      <div className="space-y-4">
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
-          {error}
+      <div className="max-w-7xl mx-auto p-6">
+        <div className="text-center py-12">
+          <ExclamationTriangleIcon className="w-16 h-16 text-red-400 mx-auto mb-4" />
+          <h1 className="text-2xl font-bold text-gray-900 mb-4">Dashboard Error</h1>
+          <p className="text-gray-600 mb-6">{error}</p>
+          <button 
+            onClick={() => fetchDashboardData()} 
+            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+          >
+            Try Again
+          </button>
         </div>
-        <button 
-          onClick={fetchDashboardData}
-          className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-        >
-          Retry
-        </button>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div className="max-w-7xl mx-auto p-6">
       {/* Header */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-        <p className="text-gray-600 mt-1">Welcome back, {currentUser?.email || 'User'}</p>
-        <p className="text-sm text-gray-500 mt-2">Team: {currentTeam?.name || 'No team selected'}</p>
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-gray-900">Team Dashboard</h1>
+        <p className="text-gray-600">Track your team's progress and performance</p>
       </div>
 
-      {/* Show error banner if there was an error but we have fallback data */}
-      {error && dashboardData && (
-        <div className="bg-yellow-50 border border-yellow-200 text-yellow-700 px-4 py-3 rounded">
-          <div className="flex justify-between items-center">
-            <span>{error} - Showing cached data.</span>
-            <button 
-              onClick={fetchDashboardData}
-              className="text-yellow-800 underline hover:no-underline"
-            >
-              Retry
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Quick Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         {/* Today's Standups */}
         <div className="bg-white rounded-lg shadow p-6">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">Today's Standups</p>
-              <p className="text-2xl font-semibold text-gray-900">{dashboardData?.standup_count || 0}</p>
+              <p className="text-2xl font-semibold text-gray-900">
+                {dashboardData?.standup_count || 0}
+              </p>
             </div>
             <UserGroupIcon className="w-8 h-8 text-blue-500" />
           </div>
@@ -237,7 +242,7 @@ function Dashboard() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">Active Sprint</p>
-              <p className="text-lg font-semibold text-gray-900">
+              <p className="text-sm font-bold text-gray-900">
                 {dashboardData?.active_sprint?.name || 'No active sprint'}
               </p>
             </div>
@@ -361,6 +366,7 @@ function Dashboard() {
           </div>
         </div>
       )}
+
       {/* Recent Standups */}
       <div className="bg-white rounded-lg shadow p-6">
         <h2 className="text-lg font-semibold text-gray-900 mb-4">Recent Team Standups</h2>
