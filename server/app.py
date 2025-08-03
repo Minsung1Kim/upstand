@@ -2293,7 +2293,7 @@ def update_user_role(team_id):
     """Update user's role in a team"""
     try:
         user_id = request.user_id
-        data = request.get_json
+        data = request.get_json()
     except Exception as e:
         print(f"Error updating user role: {str(e)}")
         return jsonify({
