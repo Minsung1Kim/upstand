@@ -1,21 +1,26 @@
 import os
+import json
+import time
+import threading
+import traceback
+import statistics
+from datetime import datetime, timedelta
+from functools import wraps
+from collections import defaultdict, Counter
+
+# Flask imports
 from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit, join_room, leave_room, disconnect
-from datetime import datetime, timedelta
+
+# Firebase imports
 import firebase_admin
 from firebase_admin import credentials, firestore, auth
+from google.oauth2 import service_account
+
+# Third-party imports
 from dotenv import load_dotenv
 import openai
-from functools import wraps
-import json
-import threading
-import time
-import traceback
-from collections import defaultdict, Counter
-import statistics
-from google.oauth2 import service_account
-import json
 
 # Load environment variables
 load_dotenv()
@@ -24,16 +29,21 @@ load_dotenv()
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key-12345')
 
-# Hardcode allowed origins for testing
-allowed_origins = [
-    'http://localhost:3000',
-    'https://upstand-omega.vercel.app',
-    'https://upstand-git-main-minsung1kims-projects.vercel.app',
-    'https://upstand-cytbctct3-minsung1kims-projects.vercel.app/'
-]
+# Get allowed origins from environment with fallback to hardcoded values
+allowed_origins_env = os.getenv('ALLOWED_ORIGINS', '')
+if allowed_origins_env:
+    allowed_origins = [origin.strip() for origin in allowed_origins_env.split(',')]
+else:
+    # Hardcoded fallback for production
+    allowed_origins = [
+        'http://localhost:3000',
+        'https://upstand-omega.vercel.app',
+        'https://upstand-git-main-minsung1kims-projects.vercel.app',
+        'https://upstand-cytbctct3-minsung1kims-projects.vercel.app'
+    ]
 
 print(f"ALLOWED_ORIGINS env var: {os.getenv('ALLOWED_ORIGINS')}")
-print(f"Hardcoded allowed_origins: {allowed_origins}")
+print(f"Final allowed_origins: {allowed_origins}")
 
 CORS(app, 
      origins=allowed_origins,
@@ -50,7 +60,11 @@ socketio = SocketIO(app,
                    ping_timeout=60,
                    ping_interval=25)
 
+# Initialize global database variable
+db = None
+
 def init_firestore():
+    """Initialize Firestore with proper error handling"""
     global db
     try:
         # Try to get service account key from environment variable
@@ -60,13 +74,14 @@ def init_firestore():
             # If it's a file path
             if service_account_key.startswith('./') or service_account_key.startswith('/'):
                 credentials_obj = service_account.Credentials.from_service_account_file(service_account_key)
+                db = firestore.Client(credentials=credentials_obj)
+                print("✅ Firestore initialized successfully with service account file")
             else:
                 # If it's JSON string
                 service_account_info = json.loads(service_account_key)
                 credentials_obj = service_account.Credentials.from_service_account_info(service_account_info)
-            
-            db = firestore.Client(credentials=credentials_obj)
-            print("✅ Firestore initialized successfully with service account")
+                db = firestore.Client(credentials=credentials_obj)
+                print("✅ Firestore initialized successfully with service account JSON")
         else:
             # Try application default credentials (for Railway/production)
             db = firestore.Client()
@@ -82,9 +97,9 @@ def init_firestore():
     except Exception as e:
         print(f"❌ Failed to initialize Firestore: {str(e)}")
         traceback.print_exc()
+        db = None
         return False
 
-# Add explicit OPTIONS handler for CORS preflight
 @app.before_request
 def handle_preflight():
     if request.method == "OPTIONS":
@@ -117,12 +132,43 @@ if firebase_key:
         print(f"❌ Firebase Admin SDK initialization error: {e}")
 
 # Initialize Firestore
-db = None
 firestore_initialized = init_firestore()
 
+# Initialize OpenAI
 openai.api_key = os.getenv('OPENAI_API_KEY')
 
+def track_user_action(action, metadata=None, team_id=None):
+    """Track user actions for analytics"""
+    try:
+        if not db:
+            return
+            
+        # Get user info from request context
+        user_id = getattr(request, 'user_id', 'anonymous')
+        company_id = getattr(request, 'company_id', 'default')
+        
+        analytics_data = {
+            'user_id': user_id,
+            'company_id': company_id,
+            'team_id': team_id,
+            'action': action,
+            'metadata': metadata or {},
+            'timestamp': datetime.utcnow().isoformat(),
+            'user_agent': request.headers.get('User-Agent', ''),
+            'ip_address': request.remote_addr
+        }
+        
+        # Store in Firestore
+        db.collection('user_analytics').add(analytics_data)
+        
+        print(f"Tracked action: {action} for user {user_id}")
+        
+    except Exception as e:
+        print(f"Error tracking user action: {str(e)}")
+        # Don't fail the main request if analytics fails
+
 def require_auth(f):
+    """Authentication decorator for protected routes"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
         id_token = request.headers.get('Authorization')
@@ -140,62 +186,19 @@ def require_auth(f):
         return f(*args, **kwargs)
     return decorated_function
 
-# ===== ANALYTICS TRACKING MIDDLEWARE =====
-
-def track_user_action(action_type, details=None, team_id=None):
-    """Track user behavior for analytics"""
-    try:
-        if not hasattr(request, 'user_id') or not db:
-            return  # Skip tracking for unauthenticated requests or no DB
-        
-        tracking_data = {
-            'user_id': request.user_id,
-            'company_id': getattr(request, 'company_id', 'default'),
-            'team_id': team_id,
-            'action_type': action_type,
-            'endpoint': request.endpoint,
-            'method': request.method,
-            'user_agent': request.headers.get('User-Agent', ''),
-            'ip_address': request.headers.get('X-Forwarded-For', request.remote_addr),
-            'timestamp': firestore.SERVER_TIMESTAMP,
-            'session_id': request.headers.get('X-Session-ID', f"session_{int(time.time())}"),
-            'details': details or {}
-        }
-        
-        # Store in analytics collection
-        db.collection('user_analytics').add(tracking_data)
-        
-        # Emit real-time analytics event for dashboards
-        socketio.emit('analytics_event', {
-            'action_type': action_type,
-            'user_id': request.user_id,
-            'team_id': team_id,
-            'timestamp': datetime.utcnow().isoformat()
-        }, room=f"analytics_{getattr(request, 'company_id', 'default')}")
-        
-    except Exception as e:
-        print(f"Analytics tracking error: {e}")
-        # Don't fail the main request if analytics fails
-        pass
-
-@app.before_request
-def track_page_view():
-    """Track page views and API usage"""
-    if request.endpoint and request.endpoint.startswith('api'):
-        # Only track after auth middleware runs
-        pass
-
-# ===== HELPER FUNCTIONS =====
-
 def detect_blockers(text):
     """Enhanced blocker detection with severity levels"""
-    blocker_keywords = {
-        'high': ['blocked', 'stuck', 'cant', "can't", 'unable', 'impossible', 'critical'],
-        'medium': ['issue', 'problem', 'waiting', 'delayed', 'slow', 'difficulty'],
-        'low': ['concern', 'question', 'unclear', 'needs help', 'support']
-    }
+    if not text:
+        return {'has_blockers': False, 'blockers': [], 'severity': 'none', 'blocker_count': 0}
     
     text_lower = text.lower()
+    
+    blocker_keywords = {
+        'high': ['blocked', 'blocker', 'urgent', 'critical', 'stuck', 'cannot proceed', 'show stopper', 'dependency', 'waiting for'],
+        'medium': ['issue', 'problem', 'difficulty', 'challenge', 'concern', 'impediment', 'delay', 'slow'],
+        'low': ['minor', 'small issue', 'question', 'clarification needed', 'help needed']
+    }
+    
     detected_blockers = []
     severity = 'none'
     
@@ -238,374 +241,84 @@ def analyze_sentiment(text):
     
     neutral_words = ['working', 'continuing', 'planned', 'meeting', 'discussing', 'reviewing', 'analyzing', 'testing',
                     'developing', 'coding', 'implementing', 'designing', 'researching', 'investigating', 'exploring',
-                    'considering', 'evaluating', 'assessing', 'monitoring', 'tracking', 'updating', 'maintaining',
-                    'documenting', 'preparing', 'organizing', 'scheduling', 'coordinating', 'communicating']
+                    'considering', 'evaluating', 'assessing', 'monitoring', 'tracking', 'updating', 'preparing']
+    
+    if not text:
+        return {'sentiment': 'neutral', 'confidence': 0.0, 'explanation': 'No text provided'}
     
     text_lower = text.lower()
-    positive_count = sum(1 for word in positive_words if word in text_lower)
-    negative_count = sum(1 for word in negative_words if word in text_lower)
-    neutral_count = sum(1 for word in neutral_words if word in text_lower)
+    words = text_lower.split()
+    
+    positive_count = sum(1 for word in words if word in positive_words)
+    negative_count = sum(1 for word in words if word in negative_words)
+    neutral_count = sum(1 for word in words if word in neutral_words)
     
     total_sentiment_words = positive_count + negative_count + neutral_count
-    confidence = min(total_sentiment_words / 10.0, 1.0) if total_sentiment_words > 0 else 0.0
     
-    if positive_count > negative_count and positive_count > neutral_count:
+    if total_sentiment_words == 0:
+        return {'sentiment': 'neutral', 'confidence': 0.3, 'explanation': 'No sentiment indicators found'}
+    
+    # Calculate sentiment based on word counts
+    if positive_count > negative_count:
         sentiment = 'positive'
-        score = positive_count / max(total_sentiment_words, 1)
-    elif negative_count > positive_count and negative_count > neutral_count:
+        confidence = min(0.9, 0.5 + (positive_count - negative_count) / len(words))
+    elif negative_count > positive_count:
         sentiment = 'negative'
-        score = negative_count / max(total_sentiment_words, 1)
+        confidence = min(0.9, 0.5 + (negative_count - positive_count) / len(words))
     else:
         sentiment = 'neutral'
-        score = neutral_count / max(total_sentiment_words, 1)
+        confidence = min(0.8, 0.4 + neutral_count / len(words))
     
     return {
         'sentiment': sentiment,
-        'confidence': confidence,
-        'score': score,
-        'word_counts': {
-            'positive': positive_count,
-            'negative': negative_count,
-            'neutral': neutral_count
-        }
+        'confidence': round(confidence, 2),
+        'explanation': f'Found {positive_count} positive, {negative_count} negative, {neutral_count} neutral indicators'
     }
 
-def calculate_sprint_velocity(team_id, company_id, sprint_count=5):
-    """Calculate team velocity over recent sprints"""
+def generate_team_summary(standups, team_info=None):
+    """Generate AI-powered team summary using OpenAI"""
     try:
-        # Get recent completed sprints
-        sprints_ref = db.collection('sprints')
-        query = sprints_ref.where('team_id', '==', team_id)\
-                          .where('company_id', '==', company_id)\
-                          .where('status', '==', 'completed')\
-                          .order_by('end_date', direction=firestore.Query.DESCENDING)\
-                          .limit(sprint_count)
+        if not standups or not os.getenv('OPENAI_API_KEY'):
+            return "Team summary unavailable"
         
-        sprints = list(query.stream())
-        
-        if not sprints:
-            return {'velocity': 0, 'trend': 'no_data', 'sprints_analyzed': 0}
-        
-        velocities = []
-        for sprint in sprints:
-            sprint_data = sprint.to_dict()
-            
-            # Get completed tasks for this sprint
-            tasks_ref = db.collection('tasks')
-            tasks_query = tasks_ref.where('sprint_id', '==', sprint.id)\
-                                 .where('status', '==', 'done')
-            
-            completed_tasks = list(tasks_query.stream())
-            story_points = sum(task.to_dict().get('estimate', 1) for task in completed_tasks)
-            velocities.append(story_points)
-        
-        avg_velocity = statistics.mean(velocities) if velocities else 0
-        
-        # Calculate trend
-        if len(velocities) >= 2:
-            recent_avg = statistics.mean(velocities[:2])
-            older_avg = statistics.mean(velocities[2:]) if len(velocities) > 2 else velocities[-1]
-            
-            if recent_avg > older_avg * 1.1:
-                trend = 'increasing'
-            elif recent_avg < older_avg * 0.9:
-                trend = 'decreasing'
-            else:
-                trend = 'stable'
-        else:
-            trend = 'insufficient_data'
-        
-        return {
-            'velocity': round(avg_velocity, 1),
-            'trend': trend,
-            'sprints_analyzed': len(velocities),
-            'velocity_history': velocities,
-            'min_velocity': min(velocities) if velocities else 0,
-            'max_velocity': max(velocities) if velocities else 0
-        }
-        
-    except Exception as e:
-        print(f"Error calculating velocity: {e}")
-        return {'velocity': 0, 'trend': 'error', 'sprints_analyzed': 0}
-
-def calculate_completion_rates(team_id, company_id, days=30):
-    """Calculate task completion rates and productivity metrics"""
-    try:
-        end_date = datetime.utcnow()
-        start_date = end_date - timedelta(days=days)
-        
-        # Get all tasks created in the time period
-        tasks_ref = db.collection('tasks')
-        
-        # Get team's sprints first to filter tasks
-        sprints_ref = db.collection('sprints')
-        sprints_query = sprints_ref.where('team_id', '==', team_id)\
-                                 .where('company_id', '==', company_id)
-        sprints = list(sprints_query.stream())
-        sprint_ids = [sprint.id for sprint in sprints]
-        
-        if not sprint_ids:
-            return {'completion_rate': 0, 'metrics': {}}
-        
-        # Get tasks for these sprints
-        all_tasks = []
-        completed_tasks = []
-        
-        for sprint_id in sprint_ids:
-            tasks_query = tasks_ref.where('sprint_id', '==', sprint_id)
-            tasks = list(tasks_query.stream())
-            
-            for task in tasks:
-                task_data = task.to_dict()
-                task_data['id'] = task.id
-                
-                # Check if task was created in our date range
-                created_at = task_data.get('created_at')
-                if created_at and isinstance(created_at, str):
-                    try:
-                        task_created = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-                        if start_date <= task_created <= end_date:
-                            all_tasks.append(task_data)
-                            if task_data.get('status') == 'done':
-                                completed_tasks.append(task_data)
-                    except:
-                        continue
-        
-        total_tasks = len(all_tasks)
-        completed_count = len(completed_tasks)
-        completion_rate = (completed_count / total_tasks * 100) if total_tasks > 0 else 0
-        
-        # Calculate additional metrics
-        status_distribution = Counter(task.get('status', 'unknown') for task in all_tasks)
-        
-        # Calculate average completion time for completed tasks
-        completion_times = []
-        for task in completed_tasks:
-            created_at = task.get('created_at')
-            updated_at = task.get('updated_at')
-            if created_at and updated_at:
-                try:
-                    created = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-                    updated = datetime.fromisoformat(updated_at.replace('Z', '+00:00'))
-                    completion_times.append((updated - created).total_seconds() / 3600)  # hours
-                except:
-                    continue
-        
-        avg_completion_time = statistics.mean(completion_times) if completion_times else 0
-        
-        return {
-            'completion_rate': round(completion_rate, 1),
-            'total_tasks': total_tasks,
-            'completed_tasks': completed_count,
-            'pending_tasks': total_tasks - completed_count,
-            'status_distribution': dict(status_distribution),
-            'avg_completion_time_hours': round(avg_completion_time, 1),
-            'period_days': days
-        }
-        
-    except Exception as e:
-        print(f"Error calculating completion rates: {e}")
-        return {'completion_rate': 0, 'metrics': {}}
-
-def analyze_blocker_metrics(team_id, company_id, days=30):
-    """Analyze blocker patterns and resolution times"""
-    try:
-        end_date = datetime.utcnow()
-        start_date = end_date - timedelta(days=days)
-        
-        # Get standups with blockers in the time period
-        standups_ref = db.collection('standups')
-        query = standups_ref.where('team_id', '==', team_id)\
-                          .where('company_id', '==', company_id)\
-                          .where('date', '>=', start_date.strftime('%Y-%m-%d'))\
-                          .where('date', '<=', end_date.strftime('%Y-%m-%d'))
-        
-        standups = list(query.stream())
-        
-        blocker_incidents = []
-        total_standups = len(standups)
-        standups_with_blockers = 0
-        
-        blocker_severity_counts = {'high': 0, 'medium': 0, 'low': 0}
-        
+        # Prepare standup data for AI analysis
+        standup_texts = []
         for standup in standups:
-            standup_data = standup.to_dict()
-            blocker_analysis = standup_data.get('blocker_analysis', {})
-            
-            if blocker_analysis.get('has_blockers'):
-                standups_with_blockers += 1
-                severity = blocker_analysis.get('severity', 'low')
-                blocker_severity_counts[severity] += 1
-                
-                blocker_incidents.append({
-                    'date': standup_data.get('date'),
-                    'user_id': standup_data.get('user_id'),
-                    'severity': severity,
-                    'blockers': blocker_analysis.get('blockers', [])
-                })
+            entry = f"Team member update:\n"
+            entry += f"Yesterday: {standup.get('yesterday', 'Not specified')}\n"
+            entry += f"Today: {standup.get('today', 'Not specified')}\n"
+            entry += f"Blockers: {standup.get('blockers', 'None')}\n\n"
+            standup_texts.append(entry)
         
-        blocker_frequency = (standups_with_blockers / total_standups * 100) if total_standups > 0 else 0
+        combined_text = "\n".join(standup_texts)
         
-        # Analyze common blocker patterns
-        all_blocker_keywords = []
-        for incident in blocker_incidents:
-            for blocker in incident['blockers']:
-                if isinstance(blocker, dict):
-                    all_blocker_keywords.append(blocker.get('keyword', ''))
-                else:
-                    all_blocker_keywords.append(str(blocker))
+        prompt = f"""
+        Analyze the following team standups and provide a concise summary (2-3 sentences) focusing on:
+        1. Overall team progress and momentum
+        2. Key achievements or completed work
+        3. Major blockers or challenges that need attention
+        4. Team sentiment and morale
         
-        common_blockers = Counter(all_blocker_keywords).most_common(5)
+        Standups:
+        {combined_text}
         
-        return {
-            'blocker_frequency_percent': round(blocker_frequency, 1),
-            'total_standups': total_standups,
-            'standups_with_blockers': standups_with_blockers,
-            'severity_distribution': blocker_severity_counts,
-            'common_blocker_types': common_blockers,
-            'total_blocker_incidents': len(blocker_incidents),
-            'period_days': days
-        }
+        Provide a professional, actionable summary suitable for managers:
+        """
+        
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=150,
+            temperature=0.3
+        )
+        
+        return response.choices[0].message.content.strip()
         
     except Exception as e:
-        print(f"Error analyzing blocker metrics: {e}")
-        return {'blocker_frequency_percent': 0, 'metrics': {}}
+        print(f"Error generating team summary: {e}")
+        return f"Team completed {len(standups)} standups today. Check individual updates for details."
 
-def get_productivity_trends(team_id, company_id, days=30):
-    """Calculate team productivity trends over time"""
-    try:
-        end_date = datetime.utcnow()
-        start_date = end_date - timedelta(days=days)
-        
-        # Get daily standup counts
-        standups_ref = db.collection('standups')
-        query = standups_ref.where('team_id', '==', team_id)\
-                          .where('company_id', '==', company_id)\
-                          .where('date', '>=', start_date.strftime('%Y-%m-%d'))\
-                          .where('date', '<=', end_date.strftime('%Y-%m-%d'))
-        
-        standups = list(query.stream())
-        
-        # Group by date
-        daily_standups = defaultdict(list)
-        daily_sentiment = defaultdict(list)
-        
-        for standup in standups:
-            standup_data = standup.to_dict()
-            date = standup_data.get('date')
-            sentiment = standup_data.get('sentiment', {}).get('sentiment', 'neutral')
-            
-            if date:
-                daily_standups[date].append(standup_data)
-                daily_sentiment[date].append(sentiment)
-        
-        # Calculate daily metrics
-        daily_metrics = []
-        for date in sorted(daily_standups.keys()):
-            standups_count = len(daily_standups[date])
-            sentiments = daily_sentiment[date]
-            
-            positive_count = sentiments.count('positive')
-            negative_count = sentiments.count('negative')
-            neutral_count = sentiments.count('neutral')
-            
-            avg_sentiment_score = 0
-            if sentiments:
-                sentiment_scores = {'positive': 1, 'neutral': 0, 'negative': -1}
-                avg_sentiment_score = sum(sentiment_scores.get(s, 0) for s in sentiments) / len(sentiments)
-            
-            daily_metrics.append({
-                'date': date,
-                'standup_count': standups_count,
-                'sentiment_score': round(avg_sentiment_score, 2),
-                'positive_count': positive_count,
-                'negative_count': negative_count,
-                'neutral_count': neutral_count
-            })
-        
-        # Calculate trends
-        if len(daily_metrics) >= 7:
-            recent_week = daily_metrics[-7:]
-            recent_avg_sentiment = statistics.mean([d['sentiment_score'] for d in recent_week])
-            recent_avg_participation = statistics.mean([d['standup_count'] for d in recent_week])
-            
-            if len(daily_metrics) >= 14:
-                previous_week = daily_metrics[-14:-7]
-                prev_avg_sentiment = statistics.mean([d['sentiment_score'] for d in previous_week])
-                prev_avg_participation = statistics.mean([d['standup_count'] for d in previous_week])
-                
-                sentiment_trend = 'improving' if recent_avg_sentiment > prev_avg_sentiment else 'declining' if recent_avg_sentiment < prev_avg_sentiment else 'stable'
-                participation_trend = 'improving' if recent_avg_participation > prev_avg_participation else 'declining' if recent_avg_participation < prev_avg_participation else 'stable'
-            else:
-                sentiment_trend = 'insufficient_data'
-                participation_trend = 'insufficient_data'
-        else:
-            recent_avg_sentiment = 0
-            recent_avg_participation = 0
-            sentiment_trend = 'insufficient_data'
-            participation_trend = 'insufficient_data'
-        
-        return {
-            'daily_metrics': daily_metrics,
-            'summary': {
-                'avg_sentiment_score': round(recent_avg_sentiment, 2),
-                'avg_daily_participation': round(recent_avg_participation, 1),
-                'sentiment_trend': sentiment_trend,
-                'participation_trend': participation_trend,
-                'total_days_tracked': len(daily_metrics)
-            }
-        }
-        
-    except Exception as e:
-        print(f"Error calculating productivity trends: {e}")
-        return {'daily_metrics': [], 'summary': {}}
-
-def summarize_standups(entries):
-    """Enhanced team summary generation"""
-    if not entries:
-        return "No standups submitted today"
-    
-    total_entries = len(entries)
-    has_blockers = any(entry.get('blockers') for entry in entries)
-    
-    summary = f"Team completed {total_entries} standups today"
-    if has_blockers:
-        summary += " with some blockers reported"
-    
-    return summary
-
-def summarize_blockers(blockers):
-    """Enhanced blocker summarization"""
-    if not blockers:
-        return {'blockers': [], 'summary': 'No active blockers'}
-    
-    # Group by severity
-    high_priority = [b for b in blockers if isinstance(b, dict) and b.get('severity') == 'high']
-    medium_priority = [b for b in blockers if isinstance(b, dict) and b.get('severity') == 'medium']
-    
-    summary = f"{len(blockers)} total blockers"
-    if high_priority:
-        summary += f" ({len(high_priority)} high priority)"
-    
-    return {
-        'blockers': blockers[:5],  # Return first 5 blockers
-        'summary': summary,
-        'high_priority_count': len(high_priority),
-        'medium_priority_count': len(medium_priority)
-    }
-
-def broadcast_standup_update(company_id, team_id, data):
-    """Broadcast standup update to team room"""
-    room = f"team_{company_id}_{team_id}"
-    socketio.emit('standup_update', data, room=room)
-
-def broadcast_activity(company_id, team_id, data):
-    """Broadcast activity update to team room"""
-    room = f"team_{company_id}_{team_id}"
-    socketio.emit('team_activity', data, room=room)
-
-# ===== SOCKET.IO EVENT HANDLERS =====
-
+# ===== WEBSOCKET EVENTS =====
 @socketio.on('connect')
 def handle_connect(auth):
     print(f'Client connected: {request.sid}')
@@ -622,7 +335,8 @@ def handle_join_team(data):
     if team_id and company_id:
         room = f"team_{company_id}_{team_id}"
         join_room(room)
-        emit('status', {'msg': f'Joined team {team_id}'})
+        print(f"Client {request.sid} joined team room: {room}")
+        emit('team_joined', {'team_id': team_id, 'room': room})
 
 @socketio.on('leave_team')
 def handle_leave_team(data):
@@ -631,6 +345,7 @@ def handle_leave_team(data):
     if team_id and company_id:
         room = f"team_{company_id}_{team_id}"
         leave_room(room)
+        print(f"Client {request.sid} left team room: {room}")
         emit('status', {'msg': f'Left team {team_id}'})
 
 @socketio.on('join_analytics')
@@ -658,908 +373,25 @@ def handle_leave_sprint(data):
 def handle_ping():
     emit('pong', {'timestamp': datetime.utcnow().isoformat()})
 
-# ===== SPRINT ROUTES =====
-
-@app.route('/api/sprints', methods=['GET'])
-@require_auth
-def get_sprints():
-    try:
-        # Check database connection
-        if not db:
-            return jsonify({'error': 'Database connection not available'}), 503
-        
-        company_id = request.company_id
-        team_id = request.args.get('team_id')
-        if not team_id:
-            return jsonify({'error': 'team_id is required'}), 400
-        
-        track_user_action('view_sprints', {'team_id': team_id}, team_id)
-        
-        sprints_ref = db.collection('sprints')
-        query = sprints_ref.where('team_id', '==', team_id).where('company_id', '==', company_id)
-        sprints = query.stream()
-        
-        sprint_list = []
-        for sprint in sprints:
-            sprint_data = sprint.to_dict()
-            sprint_data['id'] = sprint.id
-            
-            # Get tasks for this sprint
-            tasks_ref = db.collection('tasks')
-            tasks_query = tasks_ref.where('sprint_id', '==', sprint.id)
-            tasks = list(tasks_query.stream())
-            sprint_data['tasks'] = []
-            
-            # Calculate sprint metrics
-            total_story_points = 0
-            completed_story_points = 0
-            task_status_counts = {'todo': 0, 'in_progress': 0, 'done': 0}
-            
-            for task in tasks:
-                task_data = task.to_dict()
-                task_data['id'] = task.id
-                sprint_data['tasks'].append(task_data)
-                
-                # Track task metrics
-                story_points = task_data.get('estimate', 1)
-                status = task_data.get('status', 'todo')
-                
-                total_story_points += story_points
-                task_status_counts[status] += 1
-                
-                if status == 'done':
-                    completed_story_points += story_points
-            
-            # Calculate completion percentage
-            completion_percentage = (completed_story_points / total_story_points * 100) if total_story_points > 0 else 0
-            
-            # Add analytics to sprint data
-            sprint_data['analytics'] = {
-                'total_story_points': total_story_points,
-                'completed_story_points': completed_story_points,
-                'completion_percentage': round(completion_percentage, 1),
-                'task_counts': task_status_counts,
-                'total_tasks': len(tasks)
-            }
-            
-            # Get comments for this sprint
-            comments_ref = db.collection('sprint_comments')
-            comments_query = comments_ref.where('sprint_id', '==', sprint.id)
-            comments = list(comments_query.stream())
-            sprint_data['comments'] = []
-            
-            # Sort comments in Python instead of Firestore to avoid index requirements
-            comment_list = []
-            for comment in comments:
-                comment_data = comment.to_dict()
-                comment_data['id'] = comment.id
-                comment_data['time'] = 'just now' if comment_data.get('created_at') else 'unknown'
-                comment_list.append(comment_data)
-            
-            # Sort by created_at in descending order (newest first)
-            comment_list.sort(key=lambda x: x.get('created_at', ''), reverse=True)
-            sprint_data['comments'] = comment_list
-            
-            sprint_list.append(sprint_data)
-        
-        return jsonify({'success': True, 'sprints': sprint_list})
-    except Exception as e:
-        print(f"Error fetching sprints: {str(e)}")
-        traceback.print_exc()
-        return jsonify({'success': False, 'error': 'Failed to fetch sprints'}), 500
-
-@app.route('/api/sprints', methods=['POST'])
-@require_auth
-def create_sprint():
-    try:
-        # Check database connection first
-        global db
-        if not db:
-            print("❌ Database connection not available, reinitializing...")
-            firestore_initialized = init_firestore()
-            if not firestore_initialized:
-                return jsonify({'success': False, 'error': 'Database connection failed'}), 503
-            
-        data = request.json
-        company_id = request.company_id
-        team_id = data.get('team_id')
-        
-        print(f"🚀 Creating sprint for team_id: {team_id}, company_id: {company_id}")
-        print(f"📝 Received data: {data}")
-        
-        # Validate required fields
-        if not all([team_id, data.get('name'), data.get('startDate'), data.get('endDate')]):
-            print("❌ Missing required fields")
-            return jsonify({'success': False, 'error': 'Missing required fields: team_id, name, startDate, endDate'}), 400
-        
-        sprint_data = {
-            'team_id': team_id,
-            'company_id': company_id,
-            'name': data.get('name'),
-            'start_date': data.get('startDate'),
-            'end_date': data.get('endDate'),
-            'goals': data.get('goals', []),
-            'description': data.get('description', ''),
-            'created_by': request.user_id,
-            'created_at': datetime.utcnow().isoformat(),
-            'status': 'active'
-        }
-        
-        print(f"💾 Sprint data to save: {sprint_data}")
-        
-        # Save to Firestore
-        try:
-            print("📤 Adding sprint to Firestore...")
-            doc_ref = db.collection('sprints').add(sprint_data)
-            sprint_id = doc_ref[1].id
-            sprint_data['id'] = sprint_id
-            print(f"✅ Sprint created successfully with id: {sprint_id}")
-            
-            # Verify the document was actually saved
-            saved_doc = db.collection('sprints').document(sprint_id).get()
-            if saved_doc.exists:
-                print(f"✅ Verified sprint exists in database: {saved_doc.to_dict()}")
-            else:
-                print(f"❌ Sprint not found in database after creation!")
-                
-        except Exception as firestore_error:
-            print(f"❌ Firestore error: {str(firestore_error)}")
-            traceback.print_exc()
-            return jsonify({'success': False, 'error': f'Database save failed: {str(firestore_error)}'}), 500
-        
-        # Initialize analytics
-        sprint_data['analytics'] = {
-            'total_story_points': 0,
-            'completed_story_points': 0,
-            'completion_percentage': 0,
-            'task_counts': {'todo': 0, 'in_progress': 0, 'done': 0},
-            'total_tasks': 0
-        }
-        
-        # Broadcast real-time update
-        try:
-            socketio.emit('sprint_created', {
-                'sprint': sprint_data,
-                'team_id': team_id
-            }, room=f"team_{company_id}_{team_id}")
-        except Exception as socket_error:
-            print(f"Socket emit error: {socket_error}")
-            # Don't fail the request if socket fails
-        
-        return jsonify({'success': True, 'sprint': sprint_data})
-    except Exception as e:
-        print(f"Error creating sprint: {str(e)}")
-        traceback.print_exc()
-        return jsonify({'success': False, 'error': 'Failed to create sprint'}), 500
-
-@app.route('/api/sprints/<sprint_id>', methods=['PUT'])
-@require_auth
-def update_sprint(sprint_id):
-    try:
-        data = request.json
-        
-        track_user_action('update_sprint', {'sprint_id': sprint_id})
-        
-        sprint_ref = db.collection('sprints').document(sprint_id)
-        sprint_doc = sprint_ref.get()
-        if not sprint_doc.exists:
-            return jsonify({'error': 'Sprint not found'}), 404
-        
-        update_data = {
-            'name': data.get('name'),
-            'start_date': data.get('startDate'),
-            'end_date': data.get('endDate'),
-            'goals': data.get('goals', []),
-            'updated_at': datetime.utcnow().isoformat()
-        }
-        sprint_ref.update(update_data)
-        return jsonify({'success': True, 'message': 'Sprint updated'})
-    except Exception as e:
-        print(f"Error updating sprint: {str(e)}")
-        return jsonify({'success': False, 'error': 'Failed to update sprint'}), 500
-
-@app.route('/api/sprints/<sprint_id>', methods=['DELETE'])
-@require_auth
-def delete_sprint(sprint_id):
-    try:
-        # Check database connection
-        if not db:
-            print("Database connection not available")
-            return jsonify({'success': False, 'error': 'Database connection not available'}), 503
-            
-        print(f"Deleting sprint: {sprint_id}")
-        
-        track_user_action('delete_sprint', {'sprint_id': sprint_id})
-        
-        sprint_ref = db.collection('sprints').document(sprint_id)
-        sprint_doc = sprint_ref.get()
-        
-        if not sprint_doc.exists:
-            print(f"Sprint {sprint_id} not found")
-            return jsonify({'error': 'Sprint not found'}), 404
-        
-        sprint_data = sprint_doc.to_dict()
-        print(f"Deleting sprint: {sprint_data.get('name', 'Unnamed')}")
-        
-        # Delete the sprint
-        sprint_ref.delete()
-        
-        # Also delete associated tasks and comments
-        try:
-            # Delete tasks associated with this sprint
-            tasks_ref = db.collection('tasks')
-            tasks_query = tasks_ref.where('sprint_id', '==', sprint_id)
-            tasks = list(tasks_query.stream())
-            
-            for task in tasks:
-                task.reference.delete()
-                print(f"Deleted task: {task.id}")
-            
-            # Delete comments associated with this sprint
-            comments_ref = db.collection('sprint_comments')
-            comments_query = comments_ref.where('sprint_id', '==', sprint_id)
-            comments = list(comments_query.stream())
-            
-            for comment in comments:
-                comment.reference.delete()
-                print(f"Deleted comment: {comment.id}")
-                
-        except Exception as cleanup_error:
-            print(f"Error during cleanup: {cleanup_error}")
-            # Don't fail the main delete if cleanup fails
-        
-        print(f"Sprint {sprint_id} deleted successfully")
-        return jsonify({'success': True, 'message': 'Sprint deleted successfully'})
-        
-    except Exception as e:
-        print(f"Error deleting sprint: {str(e)}")
-        traceback.print_exc()
-        return jsonify({'success': False, 'error': 'Failed to delete sprint'}), 500
-
-@app.route('/api/sprints/<sprint_id>/assign', methods=['POST'])
-@require_auth
-def assign_sprint(sprint_id):
-    try:
-        track_user_action('assign_sprint', {'sprint_id': sprint_id})
-        
-        sprint_ref = db.collection('sprints').document(sprint_id)
-        sprint_doc = sprint_ref.get()
-        if not sprint_doc.exists:
-            return jsonify({'error': 'Sprint not found'}), 404
-        sprint_ref.update({'status': 'assigned', 'assigned_at': datetime.utcnow().isoformat()})
-        return jsonify({'success': True, 'message': 'Sprint assigned'})
-    except Exception as e:
-        print(f"Error assigning sprint: {str(e)}")
-        return jsonify({'success': False, 'error': 'Failed to assign sprint'}), 500
-
-@app.route('/api/sprints/<sprint_id>/complete', methods=['POST'])
-@require_auth
-def complete_sprint(sprint_id):
-    """Mark sprint as completed and calculate final analytics"""
-    try:
-        # Check database connection
-        if not db:
-            print("Database connection not available")
-            return jsonify({'success': False, 'error': 'Database connection not available'}), 503
-            
-        print(f"Completing sprint: {sprint_id}")
-        
-        track_user_action('complete_sprint', {'sprint_id': sprint_id})
-        
-        sprint_ref = db.collection('sprints').document(sprint_id)
-        sprint_doc = sprint_ref.get()
-        
-        if not sprint_doc.exists:
-            print(f"Sprint {sprint_id} not found")
-            return jsonify({'error': 'Sprint not found'}), 404
-        
-        sprint_data = sprint_doc.to_dict()
-        print(f"Completing sprint: {sprint_data.get('name', 'Unnamed')}")
-        
-        # Calculate final sprint metrics
-        tasks_ref = db.collection('tasks')
-        tasks_query = tasks_ref.where('sprint_id', '==', sprint_id)
-        tasks = list(tasks_query.stream())
-        
-        print(f"Found {len(tasks)} tasks for sprint")
-        
-        total_story_points = 0
-        completed_story_points = 0
-        task_status_counts = {'todo': 0, 'in_progress': 0, 'done': 0}
-        
-        for task in tasks:
-            task_data = task.to_dict()
-            story_points = task_data.get('estimate', 1)
-            status = task_data.get('status', 'todo')
-            
-            total_story_points += story_points
-            if status in task_status_counts:
-                task_status_counts[status] += 1
-            
-            if status == 'done':
-                completed_story_points += story_points
-        
-        completion_percentage = (completed_story_points / total_story_points * 100) if total_story_points > 0 else 0
-        
-        print(f"Sprint metrics: {completed_story_points}/{total_story_points} points ({completion_percentage:.1f}%)")
-        
-        # Update sprint with completion data
-        update_data = {
-            'status': 'completed',
-            'completed_at': datetime.utcnow().isoformat(),
-            'final_analytics': {
-                'total_story_points': total_story_points,
-                'completed_story_points': completed_story_points,
-                'completion_percentage': round(completion_percentage, 1),
-                'task_counts': task_status_counts,
-                'total_tasks': len(tasks),
-                'velocity': completed_story_points
-            }
-        }
-        
-        sprint_ref.update(update_data)
-        print(f"Sprint {sprint_id} marked as completed")
-        
-        return jsonify({
-            'success': True, 
-            'message': 'Sprint completed successfully',
-            'final_analytics': update_data['final_analytics']
-        })
-        
-    except Exception as e:
-        print(f"Error completing sprint: {str(e)}")
-        traceback.print_exc()
-        return jsonify({'success': False, 'error': 'Failed to complete sprint'}), 500
-
-# ===== TASK ROUTES =====
-
-@app.route('/api/tasks', methods=['POST'])
-@require_auth
-def create_task():
-    try:
-        data = request.json
-        company_id = request.company_id
-        
-        track_user_action('create_task', {'sprint_id': data.get('sprint_id')})
-        
-        task_data = {
-            'sprint_id': data.get('sprint_id'),
-            'company_id': company_id,
-            'title': data.get('title'),
-            'assignee': data.get('assignee', 'Unassigned'),
-            'status': data.get('status', 'todo'),
-            'estimate': int(data.get('estimate', 1)),
-            'created_by': request.user_id,
-            'created_at': datetime.utcnow().isoformat()
-        }
-        
-        if not all([task_data['sprint_id'], task_data['title']]):
-            return jsonify({'error': 'Missing required fields'}), 400
-        
-        doc_ref = db.collection('tasks').add(task_data)
-        task_data['id'] = doc_ref[1].id
-        
-        # Emit real-time update
-        socketio.emit('task_created', {
-            'task': task_data,
-            'sprint_id': task_data['sprint_id']
-        }, room=f'sprint_{task_data["sprint_id"]}')
-        
-        return jsonify({'success': True, 'task': task_data})
-    except Exception as e:
-        print(f"Error creating task: {str(e)}")
-        return jsonify({'success': False, 'error': 'Failed to create task'}), 500
-
-@app.route('/api/tasks/<task_id>', methods=['PUT'])
-@require_auth
-def update_task(task_id):
-    try:
-        data = request.json
-        
-        track_user_action('update_task', {'task_id': task_id, 'new_status': data.get('status')})
-        
-        task_ref = db.collection('tasks').document(task_id)
-        task_doc = task_ref.get()
-        
-        if not task_doc.exists:
-            return jsonify({'error': 'Task not found'}), 404
-        
-        update_data = {
-            'updated_at': datetime.utcnow().isoformat()
-        }
-        
-        # Track status changes for analytics
-        old_task_data = task_doc.to_dict()
-        old_status = old_task_data.get('status')
-        new_status = data.get('status')
-        
-        # Only update fields that are provided
-        if 'status' in data:
-            update_data['status'] = data['status']
-            
-            # Track completion time if task is being marked as done
-            if new_status == 'done' and old_status != 'done':
-                created_at = old_task_data.get('created_at')
-                if created_at:
-                    try:
-                        created_time = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-                        completion_time = datetime.utcnow()
-                        completion_duration = (completion_time - created_time).total_seconds() / 3600  # hours
-                        update_data['completion_duration_hours'] = round(completion_duration, 2)
-                        update_data['completed_at'] = datetime.utcnow().isoformat()
-                    except:
-                        pass
-        
-        if 'assignee' in data:
-            update_data['assignee'] = data['assignee']
-        if 'title' in data:
-            update_data['title'] = data['title']
-        if 'estimate' in data:
-            update_data['estimate'] = int(data['estimate'])
-        
-        task_ref.update(update_data)
-        
-        # Get updated task data
-        updated_task_doc = task_ref.get()
-        updated_task = updated_task_doc.to_dict()
-        updated_task['id'] = task_id
-        
-        # Emit real-time update
-        socketio.emit('task_updated', {
-            'task': updated_task,
-            'sprint_id': updated_task['sprint_id'],
-            'status_change': {
-                'old_status': old_status,
-                'new_status': new_status
-            } if old_status != new_status else None
-        }, room=f'sprint_{updated_task["sprint_id"]}')
-        
-        return jsonify({'success': True, 'task': updated_task})
-    except Exception as e:
-        print(f"Error updating task: {str(e)}")
-        return jsonify({'success': False, 'error': 'Failed to update task'}), 500
-
-@app.route('/api/tasks/<task_id>', methods=['DELETE'])
-@require_auth
-def delete_task(task_id):
-    try:
-        track_user_action('delete_task', {'task_id': task_id})
-        
-        task_ref = db.collection('tasks').document(task_id)
-        task_doc = task_ref.get()
-        
-        if not task_doc.exists:
-            return jsonify({'error': 'Task not found'}), 404
-        
-        task_data = task_doc.to_dict()
-        sprint_id = task_data.get('sprint_id')
-        
-        task_ref.delete()
-        
-        # Emit real-time update
-        socketio.emit('task_deleted', {
-            'task_id': task_id,
-            'sprint_id': sprint_id
-        }, room=f'sprint_{sprint_id}')
-        
-        return jsonify({'success': True, 'message': 'Task deleted'})
-    except Exception as e:
-        print(f"Error deleting task: {str(e)}")
-        return jsonify({'success': False, 'error': 'Failed to delete task'}), 500
-
-# ===== COMMENT ROUTES =====
-
-@app.route('/api/sprints/<sprint_id>/comments', methods=['POST'])
-@require_auth
-def add_sprint_comment(sprint_id):
-    try:
-        # Check database connection
-        if not db:
-            print("Database connection not available")
-            return jsonify({'success': False, 'error': 'Database connection not available'}), 503
-            
-        data = request.json
-        company_id = request.company_id
-        
-        print(f"Adding comment to sprint_id: {sprint_id}, company_id: {company_id}")
-        
-        track_user_action('add_comment', {'sprint_id': sprint_id})
-        
-        comment_data = {
-            'sprint_id': sprint_id,
-            'company_id': company_id,
-            'author': data.get('author', 'Anonymous'),
-            'text': data.get('text'),
-            'created_by': request.user_id,
-            'created_at': datetime.utcnow().isoformat()
-        }
-        
-        print(f"Comment data: {comment_data}")
-        
-        if not comment_data['text']:
-            print("Comment text is required")
-            return jsonify({'error': 'Comment text is required'}), 400
-        
-        print("Adding comment to database...")
-        doc_ref = db.collection('sprint_comments').add(comment_data)
-        comment_data['id'] = doc_ref[1].id
-        comment_data['time'] = 'just now'  # For UI compatibility
-        
-        print(f"Comment created with id: {comment_data['id']}")
-        
-        # Emit real-time update
-        try:
-            socketio.emit('comment_added', {
-                'comment': comment_data,
-                'sprint_id': sprint_id
-            }, room=f'sprint_{sprint_id}')
-        except Exception as socket_error:
-            print(f"Socket emit error: {socket_error}")
-            # Don't fail the request if socket fails
-        
-        return jsonify({'success': True, 'comment': comment_data})
-    except Exception as e:
-        print(f"Error adding comment: {str(e)}")
-        traceback.print_exc()
-        return jsonify({'success': False, 'error': 'Failed to add comment'}), 500
-
-@app.route('/api/sprints/<sprint_id>/comments', methods=['GET'])
-@require_auth
-def get_sprint_comments(sprint_id):
-    try:
-        track_user_action('view_comments', {'sprint_id': sprint_id})
-        
-        comments_ref = db.collection('sprint_comments')
-        comments_query = comments_ref.where('sprint_id', '==', sprint_id)
-        comments = list(comments_query.stream())
-        
-        comment_list = []
-        for comment in comments:
-            comment_data = comment.to_dict()
-            comment_data['id'] = comment.id
-            comment_data['time'] = 'just now' if comment_data.get('created_at') else 'unknown'
-            comment_list.append(comment_data)
-        
-        # Sort by created_at in descending order (newest first)
-        comment_list.sort(key=lambda x: x.get('created_at', ''), reverse=True)
-        
-        return jsonify({'success': True, 'comments': comment_list})
-    except Exception as e:
-        print(f"Error fetching comments: {str(e)}")
-        return jsonify({'success': False, 'error': 'Failed to fetch comments'}), 500
-
-# ===== RETROSPECTIVE ROUTES =====
-
-@app.route('/api/retrospectives', methods=['POST'])
-@require_auth
-def create_retrospective():
-    """Create a retrospective session"""
-    try:
-        data = request.get_json()
-        new_role = data.get('role')
-        
-        if not new_role or new_role not in ['OWNER', 'MANAGER', 'DEVELOPER', 'VIEWER']:
-            return jsonify({
-                'success': False,
-                'error': 'Invalid role'
-            }), 400
-        
-        # Get team document
-        team_ref = db.collection('teams').document(team_id)
-        team_doc = team_ref.get()
-        
-        if not team_doc.exists:
-            return jsonify({
-                'success': False,
-                'error': 'Team not found'
-            }), 404
-        
-        team_data = team_doc.to_dict()
-        
-        # Check if user is a member
-        if user_id not in team_data.get('members', []):
-            return jsonify({
-                'success': False,
-                'error': 'You are not a member of this team'
-            }), 403
-        
-        # Update user's role
-        member_roles = team_data.get('member_roles', {})
-        member_roles[user_id] = new_role
-        
-        team_ref.update({
-            'member_roles': member_roles,
-            'updated_at': datetime.utcnow().isoformat()
-        })
-        
-        return jsonify({
-            'success': True,
-            'message': f'Role updated to {new_role}'
-        })
-        
-    except Exception as e:
-        print(f"Error updating role: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': 'Failed to update role'
-        }), 500
-
-@app.route('/api/teams/<team_id>/join', methods=['POST'])
-@require_auth
-def join_team(team_id):
-    """Join a team"""
-    try:
-        user_id = request.user_id
-        
-        # Get team document
-        team_ref = db.collection('teams').document(team_id)
-        team_doc = team_ref.get()
-        
-        if not team_doc.exists:
-            return jsonify({
-                'success': False,
-                'error': 'Team not found'
-            }), 404
-        
-        team_data = team_doc.to_dict()
-        
-        # Check if user is already a member
-        if user_id in team_data.get('members', []):
-            return jsonify({
-                'success': False,
-                'error': 'You are already a member of this team'
-            }), 400
-        
-        # Add user to team
-        members = team_data.get('members', [])
-        members.append(user_id)
-        
-        member_roles = team_data.get('member_roles', {})
-        member_roles[user_id] = 'DEVELOPER'  # Default role
-        
-        member_joined = team_data.get('member_joined', {})
-        member_joined[user_id] = datetime.utcnow().isoformat()
-        
-        team_ref.update({
-            'members': members,
-            'member_roles': member_roles,
-            'member_joined': member_joined,
-            'updated_at': datetime.utcnow().isoformat()
-        })
-        
-        return jsonify({
-            'success': True,
-            'message': 'Successfully joined team'
-        })
-        
-    except Exception as e:
-        print(f"Error joining team: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': 'Failed to join team'
-        }), 500
-
-@app.route('/api/teams/<team_id>/leave', methods=['POST'])
-@require_auth
-def leave_team(team_id):
-    """Leave a team"""
-    try:
-        user_id = request.user_id
-        
-        # Get team document
-        team_ref = db.collection('teams').document(team_id)
-        team_doc = team_ref.get()
-        
-        if not team_doc.exists:
-            return jsonify({
-                'success': False,
-                'error': 'Team not found'
-            }), 404
-        
-        team_data = team_doc.to_dict()
-        
-        # Check if user is a member
-        if user_id not in team_data.get('members', []):
-            return jsonify({
-                'success': False,
-                'error': 'You are not a member of this team'
-            }), 400
-        
-        # Check if user is owner
-        if team_data.get('owner_id') == user_id:
-            return jsonify({
-                'success': False,
-                'error': 'Team owner cannot leave team. Transfer ownership or delete the team.'
-            }), 400
-        
-        # Remove user from team
-        members = team_data.get('members', [])
-        members.remove(user_id)
-        
-        member_roles = team_data.get('member_roles', {})
-        if user_id in member_roles:
-            del member_roles[user_id]
-        
-        member_joined = team_data.get('member_joined', {})
-        if user_id in member_joined:
-            del member_joined[user_id]
-        
-        team_ref.update({
-            'members': members,
-            'member_roles': member_roles,
-            'member_joined': member_joined,
-            'updated_at': datetime.utcnow().isoformat()
-        })
-        
-        return jsonify({
-            'success': True,
-            'message': 'Successfully left team'
-        })
-        
-    except Exception as e:
-        print(f"Error leaving team: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': 'Failed to leave team'
-        }), 500
-
-# ===== ERROR HANDLERS =====
-
-@app.errorhandler(404)
-def not_found(error):
-    return jsonify({'error': 'Endpoint not found'}), 404
-
-@app.errorhandler(500)
-def internal_error(error):
-    return jsonify({'error': 'Internal server error'}), 500
-
-@app.errorhandler(403)
-def forbidden(error):
-    return jsonify({'error': 'Access forbidden'}), 403
-
-@app.errorhandler(401)
-def unauthorized(error):
-    return jsonify({'error': 'Unauthorized access'}), 401
-
-if __name__ == '__main__':
-    debug_mode = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
-    port = int(os.getenv('PORT', 5000))
-    host = '0.0.0.0'
-    
-    print(f"Starting Upstand server on {host}:{port}")
-    print(f"Debug mode: {debug_mode}")
-    print(f"Allowed origins: {allowed_origins}")
-    print(f"Firebase status: {'Connected' if db else 'Not connected'}")
-    print(f"WebSocket support: {socketio.server.eio.async_mode}")
-    print(f"Analytics: Enabled")
-    print(f"Features: User tracking, Sprint velocity, Task completion rates, Blocker analysis, Productivity trends")
-    
-    socketio.run(app, 
-                debug=debug_mode, 
-                port=port, 
-                host=host, 
-                allow_unsafe_werkzeug=True)
-
-@app.route('/api/retrospectives', methods=['GET'])
-@require_auth
-def get_retrospectives():
-    """Get retrospectives for a team"""
-    try:
-        company_id = request.company_id
-        team_id = request.args.get('team_id')
-        
-        if not team_id:
-            return jsonify({'error': 'team_id is required'}), 400
-        
-        track_user_action('view_retrospectives', {'team_id': team_id}, team_id)
-        
-        # Verify team belongs to current company
-        team_ref = db.collection('teams').document(team_id)
-        team_doc = team_ref.get()
-        if not team_doc.exists or team_doc.to_dict().get('company_id') != company_id:
-            return jsonify({'error': 'Team not found or access denied'}), 403
-        
-        # Get retrospectives for the team
-        retros_ref = db.collection('retrospectives')
-        query = retros_ref.where('team_id', '==', team_id).where('company_id', '==', company_id).order_by('created_at', direction=firestore.Query.DESCENDING)
-        retros = query.stream()
-        
-        retro_list = []
-        for retro in retros:
-            retro_data = retro.to_dict()
-            retro_data['id'] = retro.id
-            # Convert timestamp to ISO string for JSON serialization
-            if 'created_at' in retro_data and retro_data['created_at']:
-                if hasattr(retro_data['created_at'], 'isoformat'):
-                    retro_data['created_at'] = retro_data['created_at'].isoformat()
-                elif hasattr(retro_data['created_at'], 'timestamp'):
-                    retro_data['created_at'] = datetime.fromtimestamp(retro_data['created_at'].timestamp()).isoformat()
-            retro_list.append(retro_data)
-        
-        return jsonify({
-            'success': True,
-            'retrospectives': retro_list
-        })
-        
-    except Exception as e:
-        print(f"Error fetching retrospectives: {str(e)}")
-        return jsonify({'success': False, 'error': 'Failed to fetch retrospectives'}), 500
-
-# Singular retrospective route (for frontend compatibility)
-@app.route('/api/retrospective', methods=['POST'])
-@require_auth
-def submit_retrospective_feedback():
-    """Submit individual retrospective feedback"""
-    try:
-        data = request.get_json()
-        company_id = request.company_id
-        team_id = data.get('team_id')
-        
-        if not team_id:
-            return jsonify({'error': 'team_id is required'}), 400
-        
-        track_user_action('submit_retrospective_feedback', {'team_id': team_id}, team_id)
-        
-        # Verify team belongs to current company
-        team_ref = db.collection('teams').document(team_id)
-        team_doc = team_ref.get()
-        if not team_doc.exists or team_doc.to_dict().get('company_id') != company_id:
-            return jsonify({'error': 'Team not found or access denied'}), 403
-        
-        feedback_data = {
-            'team_id': team_id,
-            'company_id': company_id,
-            'sprint_id': data.get('sprint_id', 'current'),
-            'feedback': data.get('feedback', ''),
-            'category': data.get('category', 'went_well'),
-            'anonymous': data.get('anonymous', True),
-            'created_by': request.user_id if not data.get('anonymous') else None,
-            'created_at': firestore.SERVER_TIMESTAMP
-        }
-        
-        # Basic AI analysis for the feedback
-        feedback_text = feedback_data['feedback']
-        category = feedback_data['category']
-        
-        analysis = {
-            'themes': [{
-                'title': f"{category.replace('_', ' ').title()} Feedback",
-                'sentiment': 'positive' if category == 'went_well' else 'neutral' if category == 'action_items' else 'negative',
-                'items': [feedback_text],
-                'actionable': category == 'action_items' or 'should' in feedback_text.lower()
-            }],
-            'overall_sentiment': f"Team member provided {category.replace('_', ' ')} feedback",
-            'suggested_actions': [f"Review and discuss: {feedback_text[:50]}..."] if len(feedback_text) > 50 else [f"Review: {feedback_text}"]
-        }
-        
-        # Save to Firestore
-        doc_ref = db.collection('retrospective_feedback').add(feedback_data)
-        
-        # Emit real-time update
-        socketio.emit('retrospective_feedback_added', {
-            'feedback_id': doc_ref[1].id,
-            'team_id': team_id,
-            'category': category,
-            'anonymous': feedback_data['anonymous']
-        }, room=f"team_{company_id}_{team_id}")
-        
-        return jsonify({
-            'success': True,
-            'feedback_id': doc_ref[1].id,
-            'analysis': analysis,
-            'message': 'Feedback submitted successfully'
-        })
-        
-    except Exception as e:
-        print(f"Error submitting retrospective feedback: {str(e)}")
-        traceback.print_exc()
-        return jsonify({'success': False, 'error': 'Failed to submit feedback'}), 500
-
 # ===== HEALTH AND UTILITY ROUTES =====
-
 @app.route('/health', methods=['GET'])
 def railway_health():
     return jsonify({'status': 'healthy', 'service': 'upstand-backend'})
+
+@app.route('/api/health', methods=['GET'])
+def api_health():
+    firebase_status = 'connected' if db is not None else 'disconnected'
+    openai_status = 'configured' if os.getenv('OPENAI_API_KEY') else 'not configured'
+    return jsonify({
+        'status': 'healthy' if firebase_status == 'connected' else 'degraded',
+        'timestamp': datetime.utcnow().isoformat(),
+        'services': {
+            'firebase': firebase_status,
+            'openai': openai_status,
+            'websocket': 'enabled',
+            'analytics': 'enabled'
+        }
+    })
 
 @app.route('/debug/routes', methods=['GET'])
 def list_routes():
@@ -1586,465 +418,7 @@ def cors_test():
         'request_origin': request.headers.get('Origin', 'No origin header')
     })
 
-# ===== ANALYTICS ROUTES =====
-
-@app.route('/api/analytics/overview', methods=['GET'])
-@require_auth
-def get_analytics_overview():
-    """Get comprehensive analytics overview for a team"""
-    try:
-        team_id = request.args.get('team_id')
-        company_id = request.company_id
-        days = int(request.args.get('days', 30))
-        
-        if not team_id:
-            return jsonify({'error': 'team_id is required'}), 400
-        
-        track_user_action('view_analytics', {'team_id': team_id, 'days': days}, team_id)
-        
-        # Verify team access
-        team_ref = db.collection('teams').document(team_id)
-        team_doc = team_ref.get()
-        if not team_doc.exists or team_doc.to_dict().get('company_id') != company_id:
-            return jsonify({'error': 'Team not found or access denied'}), 403
-        
-        # Get all analytics metrics
-        velocity_data = calculate_sprint_velocity(team_id, company_id)
-        completion_data = calculate_completion_rates(team_id, company_id, days)
-        blocker_data = analyze_blocker_metrics(team_id, company_id, days)
-        productivity_data = get_productivity_trends(team_id, company_id, days)
-        
-        # Get user activity metrics
-        analytics_ref = db.collection('user_analytics')
-        activity_query = analytics_ref.where('team_id', '==', team_id)\
-                                    .where('company_id', '==', company_id)\
-                                    .order_by('timestamp', direction=firestore.Query.DESCENDING)\
-                                    .limit(100)
-        
-        recent_activity = list(activity_query.stream())
-        
-        # Process activity data
-        activity_summary = {
-            'total_actions': len(recent_activity),
-            'unique_users': len(set(a.to_dict().get('user_id') for a in recent_activity)),
-            'action_types': Counter(a.to_dict().get('action_type') for a in recent_activity)
-        }
-        
-        analytics_overview = {
-            'team_id': team_id,
-            'period_days': days,
-            'last_updated': datetime.utcnow().isoformat(),
-            'sprint_velocity': velocity_data,
-            'completion_rates': completion_data,
-            'blocker_analysis': blocker_data,
-            'productivity_trends': productivity_data,
-            'user_activity': activity_summary
-        }
-        
-        return jsonify({
-            'success': True,
-            'analytics': analytics_overview
-        })
-        
-    except Exception as e:
-        print(f"Error fetching analytics overview: {e}")
-        traceback.print_exc()
-        return jsonify({'success': False, 'error': 'Failed to fetch analytics'}), 500
-
-@app.route('/api/submit-standup', methods=['POST'])
-@require_auth
-def submit_standup():
-    """Submit daily standup and receive AI summary for current company"""
-    try:
-        data = request.json
-        team_id = data.get('team_id')
-        company_id = request.company_id
-        
-        if not team_id:
-            return jsonify({'error': 'team_id is required'}), 400
-        
-        track_user_action('submit_standup', {'team_id': team_id}, team_id)
-        
-        # Verify team belongs to current company
-        team_ref = db.collection('teams').document(team_id)
-        team_doc = team_ref.get()
-        if not team_doc.exists or team_doc.to_dict().get('company_id') != company_id:
-            return jsonify({'error': 'Team not found or access denied'}), 403
-        
-        # Enhanced blocker and sentiment analysis
-        full_text = f"{data.get('yesterday', '')} {data.get('today', '')} {data.get('blockers', '')}"
-        blocker_analysis = detect_blockers(full_text)
-        sentiment_analysis = analyze_sentiment(full_text)
-        
-        # Create standup entry
-        standup_data = {
-            'user_id': request.user_id,
-            'user_email': request.user_email,
-            'team_id': team_id,
-            'company_id': company_id,
-            'yesterday': data.get('yesterday', ''),
-            'today': data.get('today', ''),
-            'blockers': data.get('blockers', ''),
-            'timestamp': firestore.SERVER_TIMESTAMP,
-            'date': datetime.utcnow().strftime('%Y-%m-%d'),
-            'blocker_analysis': blocker_analysis,
-            'sentiment': sentiment_analysis
-        }
-        
-        # Save to Firestore
-        doc_ref = db.collection('standups').add(standup_data)
-        standup_id = doc_ref[1].id
-        
-        # Get today's standups for the team in current company
-        today = datetime.utcnow().strftime('%Y-%m-%d')
-        team_standups = db.collection('standups').where('team_id', '==', team_id)\
-                         .where('company_id', '==', company_id)\
-                         .where('date', '==', today).get()
-        
-        standup_entries = []
-        for doc in team_standups:
-            entry = doc.to_dict()
-            standup_entries.append({
-                'user': entry.get('user_email', 'Unknown'),
-                'yesterday': entry.get('yesterday', ''),
-                'today': entry.get('today', ''),
-                'blockers': entry.get('blockers', '')
-            })
-        
-        # Generate enhanced team summary
-        team_summary = ""
-        if len(standup_entries) > 1:
-            team_summary = summarize_standups(standup_entries)
-        
-        # Broadcast real-time standup update
-        standup_broadcast_data = {
-            'id': standup_id,
-            'user_id': request.user_id,
-            'user_email': request.user_email,
-            'team_id': team_id,
-            'yesterday': data.get('yesterday', ''),
-            'today': data.get('today', ''),
-            'blockers': data.get('blockers', ''),
-            'blocker_analysis': blocker_analysis,
-            'sentiment': sentiment_analysis,
-            'timestamp': datetime.utcnow().isoformat()
-        }
-        broadcast_standup_update(company_id, team_id, standup_broadcast_data)
-        
-        # Broadcast activity update
-        activity_data = {
-            'id': f"activity_{int(time.time() * 1000)}",
-            'activity_type': 'standup',
-            'user_name': request.user_email.split('@')[0],
-            'user_id': request.user_id,
-            'details': {
-                'action': 'submitted',
-                'blocker': data.get('blockers', '') if data.get('blockers', '') else None,
-                'sentiment': sentiment_analysis.get('sentiment')
-            },
-            'timestamp': datetime.utcnow().isoformat()
-        }
-        broadcast_activity(company_id, team_id, activity_data)
-        
-        # Send notification for high-priority blockers
-        if blocker_analysis.get('severity') in ['high', 'medium']:
-            notification_data = {
-                'type': 'warning' if blocker_analysis.get('severity') == 'high' else 'info',
-                'title': f"{blocker_analysis.get('severity').title()} Priority Blocker Detected",
-                'message': f"{request.user_email.split('@')[0]} reported {blocker_analysis.get('severity')} priority blockers",
-                'team_id': team_id
-            }
-            team_room = f"team_{company_id}_{team_id}"
-            socketio.emit('notification', {
-                'id': f"notif_{int(time.time() * 1000)}",
-                'type': notification_data['type'],
-                'title': notification_data['title'],
-                'message': notification_data['message'],
-                'sender': 'System',
-                'timestamp': datetime.utcnow().isoformat(),
-                'team_id': team_id
-            }, room=team_room)
-        
-        return jsonify({
-            'success': True,
-            'standup_id': standup_id,
-            'blocker_analysis': blocker_analysis,
-            'sentiment': sentiment_analysis,
-            'team_summary': team_summary,
-            'team_standup_count': len(standup_entries)
-        })
-        
-    except Exception as e:
-        print(f"Error submitting standup: {e}")
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/dashboard', methods=['GET'])
-@require_auth
-def get_dashboard():
-    """Get enhanced dashboard data for current user in current company"""
-    try:
-        user_id = request.user_id
-        company_id = request.company_id
-        team_id = request.args.get('team_id')
-        
-        if not team_id:
-            return jsonify({'error': 'team_id is required'}), 400
-        
-        track_user_action('view_dashboard', {'team_id': team_id}, team_id)
-        
-        # Verify team belongs to current company
-        team_ref = db.collection('teams').document(team_id)
-        team_doc = team_ref.get()
-        if not team_doc.exists or team_doc.to_dict().get('company_id') != company_id:
-            return jsonify({'error': 'Team not found or access denied'}), 403
-        
-        # Get today's date
-        today = datetime.utcnow().strftime('%Y-%m-%d')
-        
-        # Get today's standups for the team in current company
-        team_standups = db.collection('standups').where('team_id', '==', team_id)\
-                         .where('company_id', '==', company_id)\
-                         .where('date', '==', today).get()
-        
-        standup_count = len(list(team_standups))
-        
-        # Enhanced analysis of standups
-        team_summary = ""
-        sentiment_data = {'positive': 0, 'neutral': 0, 'negative': 0}
-        active_blockers = []
-        blocker_severity_counts = {'high': 0, 'medium': 0, 'low': 0}
-        
-        if standup_count > 0:
-            standup_entries = []
-            all_sentiments = []
-            
-            for doc in team_standups:
-                entry = doc.to_dict()
-                standup_entries.append({
-                    'user': entry.get('user_email', 'Unknown'),
-                    'yesterday': entry.get('yesterday', ''),
-                    'today': entry.get('today', ''),
-                    'blockers': entry.get('blockers', '')
-                })
-                
-                # Collect enhanced blocker data
-                blocker_analysis = entry.get('blocker_analysis', {})
-                if blocker_analysis.get('has_blockers'):
-                    severity = blocker_analysis.get('severity', 'low')
-                    blocker_severity_counts[severity] += 1
-                    
-                    for blocker in blocker_analysis.get('blockers', []):
-                        active_blockers.append({
-                            'user': entry.get('user_email', 'Unknown'),
-                            'blocker': blocker,
-                            'severity': severity
-                        })
-                
-                # Collect sentiment data
-                sentiment = entry.get('sentiment', {})
-                sentiment_value = sentiment.get('sentiment', 'neutral')
-                all_sentiments.append(sentiment_value)
-                sentiment_data[sentiment_value] += 1
-            
-            # Generate enhanced team summary
-            if len(standup_entries) > 1:
-                team_summary = summarize_standups(standup_entries)
-        
-        # Calculate overall team sentiment
-        total_sentiments = sum(sentiment_data.values())
-        sentiment_percentages = {
-            k: round((v / total_sentiments * 100), 1) if total_sentiments > 0 else 0 
-            for k, v in sentiment_data.items()
-        }
-        
-        # Get quick analytics for dashboard
-        velocity_data = calculate_sprint_velocity(team_id, company_id, 3)
-        completion_data = calculate_completion_rates(team_id, company_id, 7)
-        
-        # Get recent standups (last 7 days)
-        recent_standups = []
-        try:
-            end_date = datetime.utcnow()
-            start_date = end_date - timedelta(days=7)
-            standups_ref = db.collection('standups')
-            standups_query = standups_ref.where('team_id', '==', team_id)\
-                        .where('company_id', '==', company_id)\
-                        .where('date', '>=', start_date.strftime('%Y-%m-%d'))\
-                        .order_by('date', direction=firestore.Query.DESCENDING)\
-                        .limit(10)
-            standups = list(standups_query.stream())
-
-            for standup in standups:
-                standup_data = standup.to_dict()
-                standup_data['id'] = standup.id  # Add document ID
-                recent_standups.append({
-                    'id': standup.id,
-                    'user_email': standup_data.get('user_email', 'Unknown'),
-                    'date': standup_data.get('date', ''),
-                    'today': standup_data.get('today', '')[:100] + ('...' if len(standup_data.get('today', '')) > 100 else ''),
-                    'blockers': standup_data.get('blockers', '')
-                })
-        except Exception as e:
-            print(f"Error fetching recent standups: {e}")
-
-        # Get recent retrospectives (last 30 days)
-        recent_retros = []
-        try:
-            retros_ref = db.collection('retrospectives')
-            retros_query = retros_ref.where('team_id', '==', team_id)\
-                        .where('company_id', '==', company_id)\
-                        .order_by('created_at', direction=firestore.Query.DESCENDING)\
-                        .limit(5)
-            retros = list(retros_query.stream())
-
-            for retro in retros:
-                retro_data = retro.to_dict()
-                # Convert timestamp to string
-                created_at = 'Recently'
-                if retro_data.get('created_at'):
-                    try:
-                        if hasattr(retro_data['created_at'], 'timestamp'):
-                            created_at = datetime.fromtimestamp(retro_data['created_at'].timestamp()).strftime('%Y-%m-%d')
-                        else:
-                            created_at = str(retro_data['created_at'])[:10]
-                    except:
-                        created_at = 'Recently'
-
-                recent_retros.append({
-                    'sprint_name': retro_data.get('sprint_name', ''),
-                    'what_went_well': retro_data.get('what_went_well', []),
-                    'what_could_improve': retro_data.get('what_could_improve', []),
-                    'created_at': created_at
-                })
-        except Exception as e:
-            print(f"Error fetching recent retrospectives: {e}")
-            
-        # Get active sprint info
-        active_sprint = None
-        try:
-            sprints_ref = db.collection('sprints')
-            active_sprints_query = sprints_ref.where('team_id', '==', team_id)\
-                             .where('company_id', '==', company_id)\
-                             .where('status', '==', 'active')\
-                             .limit(1)
-            active_sprints = list(active_sprints_query.stream())
-            
-            if active_sprints:
-                sprint_data = active_sprints[0].to_dict()
-                sprint_data['id'] = active_sprints[0].id
-                
-                # Get tasks for this sprint to calculate progress
-                tasks_ref = db.collection('tasks')
-                tasks_query = tasks_ref.where('sprint_id', '==', sprint_data['id'])
-                tasks = list(tasks_query.stream())
-                
-                total_tasks = len(tasks)
-                completed_tasks = len([t for t in tasks if t.to_dict().get('status') == 'done'])
-                
-                active_sprint = {
-                    'id': sprint_data['id'],
-                    'name': sprint_data.get('name', 'Unnamed Sprint'),
-                    'total_tasks': total_tasks,
-                    'completed_tasks': completed_tasks,
-                    'progress': round((completed_tasks / total_tasks * 100), 1) if total_tasks > 0 else 0
-                }
-        except Exception as e:
-            print(f"Error fetching active sprint: {e}")
-            active_sprint = None
-        
-        dashboard_data = {
-            'standup_count': standup_count, 
-            'team_summary': team_summary,
-            'active_sprint': active_sprint,
-            'recent_standups': recent_standups,
-            'recent_retros': recent_retros,
-            'sentiment_analysis': {
-                'distribution': sentiment_data,
-                'percentages': sentiment_percentages,
-                'dominant_sentiment': max(sentiment_data.items(), key=lambda x: x[1])[0] if total_sentiments > 0 else 'neutral'
-            },
-            'blocker_analysis': {
-                'active_blockers': active_blockers[:5],  # Show top 5
-                'severity_counts': blocker_severity_counts,
-                'total_blockers': len(active_blockers)
-            },
-            'quick_metrics': {
-                'sprint_velocity': velocity_data.get('velocity', 0),
-                'velocity_trend': velocity_data.get('trend', 'unknown'),
-                'completion_rate': completion_data.get('completion_rate', 0),
-                'total_tasks_week': completion_data.get('total_tasks', 0)
-            }
-        }
-        
-        return jsonify({
-            'success': True,
-            'dashboard': dashboard_data
-        })
-        
-    except Exception as e:
-        print(f"Error fetching dashboard data: {str(e)}")
-        traceback.print_exc()
-        return jsonify({
-            'success': False,
-            'error': 'Failed to fetch dashboard data'
-        }), 500
-
-@app.route('/api/standups', methods=['GET'])
-@require_auth
-def get_standups():
-    """Get standups for a team"""
-    try:
-        company_id = request.company_id
-        team_id = request.args.get('team_id')
-        
-        if not team_id:
-            return jsonify({'error': 'team_id is required'}), 400
-        
-        track_user_action('view_standups', {'team_id': team_id}, team_id)
-        
-        # Get last 7 days of standups
-        end_date = datetime.utcnow()
-        start_date = end_date - timedelta(days=7)
-        
-        standups_ref = db.collection('standups')
-        query = standups_ref.where('team_id', '==', team_id)\
-                          .where('company_id', '==', company_id)\
-                          .where('date', '>=', start_date.strftime('%Y-%m-%d'))\
-                          .order_by('date', direction=firestore.Query.DESCENDING)
-        
-        standups = list(query.stream())
-        
-        standup_list = []
-        for standup in standups:
-            standup_data = standup.to_dict()
-            standup_data['id'] = standup.id
-            standup_data['time'] = 'recently'  # Simple time display
-            standup_list.append(standup_data)
-        
-        return jsonify({'success': True, 'standups': standup_list})
-        
-    except Exception as e:
-        print(f"Error fetching standups: {str(e)}")
-        return jsonify({'success': False, 'error': 'Failed to fetch standups'}), 500
-
-@app.route('/api/health', methods=['GET'])
-def health_check():
-    firebase_status = 'connected' if db is not None else 'disconnected'
-    openai_status = 'configured' if os.getenv('OPENAI_API_KEY') else 'not configured'
-    return jsonify({
-        'status': 'healthy' if firebase_status == 'connected' else 'degraded',
-        'timestamp': datetime.utcnow().isoformat(),
-        'services': {
-            'firebase': firebase_status,
-            'openai': openai_status,
-            'websocket': 'enabled',
-            'analytics': 'enabled'
-        }
-    })
-
 # ===== TEAMS ROUTES =====
-
 @app.route('/api/teams', methods=['GET'])
 @require_auth
 def get_teams():
@@ -2056,6 +430,8 @@ def get_teams():
             
         user_id = request.user_id
         company_id = request.company_id
+        
+        track_user_action('view_teams', {'company_id': company_id})
         
         # Query teams where user is a member and belongs to current company
         teams_ref = db.collection('teams')
@@ -2081,7 +457,7 @@ def get_teams():
             if owner_id:
                 try:
                     owner_user = auth.get_user(owner_id)
-                    owner_name = owner_user.email or owner_user.display_name or 'Unknown'
+                    owner_name = owner_user.display_name or owner_user.email
                 except:
                     owner_name = 'Unknown'
             
@@ -2112,12 +488,7 @@ def get_teams():
 @app.route('/api/teams', methods=['POST'])
 @require_auth
 def create_team():
-    """Create a new team in the current company"""
     try:
-        # Check database connection
-        if not db:
-            return jsonify({'success': False, 'error': 'Database connection not available'}), 503
-            
         user_id = request.user_id
         user_email = request.user_email
         company_id = request.company_id
@@ -2131,12 +502,14 @@ def create_team():
                 'error': 'Team name is required'
             }), 400
         
+        track_user_action('create_team', {'team_name': team_name})
+        
         # Create team document
         team_doc = {
             'name': team_name,
             'description': data.get('description', ''),
             'owner_id': user_id,
-            'company_id': company_id,  # Use company from request context
+            'company_id': company_id,
             'members': [user_id],  # Owner is automatically a member
             'member_roles': {
                 user_id: 'OWNER'
@@ -2160,7 +533,7 @@ def create_team():
                 'member_count': 1,
                 'owner_name': user_email,
                 'owner_id': user_id,
-                'company_id': team_doc['company_id'],
+                'company_id': company_id,
                 'created_at': team_doc['created_at'],
                 'description': team_doc['description']
             }
@@ -2257,15 +630,17 @@ def delete_team(team_id):
         
         team_data = team_doc.to_dict()
         
-        # Check if user is owner
+        # Check if user is the owner
         if team_data.get('owner_id') != user_id:
             return jsonify({
                 'success': False,
-                'error': 'Access denied - only team owner can delete team'
+                'error': 'Only team owner can delete team'
             }), 403
         
-        # Delete team document
+        # Delete the team
         team_ref.delete()
+        
+        track_user_action('delete_team', {'team_id': team_id})
         
         return jsonify({
             'success': True,
@@ -2278,58 +653,1406 @@ def delete_team(team_id):
             'success': False,
             'error': 'Failed to delete team'
         }), 500
-
-@app.route('/api/teams/<team_id>/role', methods=['PUT'])
+    
+# ===== STANDUP ROUTES =====
+@app.route('/api/standups', methods=['POST'])
 @require_auth
-def update_user_role(team_id):
-    """Update user's role in a team"""
+def submit_standup():
+    """Submit a daily standup"""
     try:
         user_id = request.user_id
-        data = request.get_json()  # <-- Added parentheses here
-        new_role = data.get('role')
+        user_email = request.user_email
+        company_id = request.company_id
         
-        if not new_role or new_role not in ['OWNER', 'MANAGER', 'DEVELOPER', 'VIEWER']:
-            return jsonify({
-                'success': False,
-                'error': 'Invalid role'
-            }), 400
+        data = request.get_json()
+        team_id = data.get('team_id')
+        
+        if not team_id:
+            return jsonify({'error': 'team_id is required'}), 400
+        
+        track_user_action('submit_standup', {'team_id': team_id}, team_id)
+        
+        # Verify team belongs to current company
+        team_ref = db.collection('teams').document(team_id)
+        team_doc = team_ref.get()
+        if not team_doc.exists or team_doc.to_dict().get('company_id') != company_id:
+            return jsonify({'error': 'Team not found or access denied'}), 403
+        
+        today = datetime.utcnow().strftime('%Y-%m-%d')
+        
+        # Enhanced AI analysis
+        yesterday_text = data.get('yesterday', '')
+        today_text = data.get('today', '')
+        blockers_text = data.get('blockers', '')
+        
+        # Analyze text for insights
+        blocker_analysis = detect_blockers(blockers_text)
+        sentiment_analysis = analyze_sentiment(f"{yesterday_text} {today_text}")
+        
+        standup_data = {
+            'user_id': user_id,
+            'user_email': user_email,
+            'team_id': team_id,
+            'company_id': company_id,
+            'date': today,
+            'yesterday': yesterday_text,
+            'today': today_text,
+            'blockers': blockers_text,
+            'blocker_analysis': blocker_analysis,
+            'sentiment_analysis': sentiment_analysis,
+            'created_at': datetime.utcnow().isoformat()
+        }
+        
+        # Save to Firestore
+        db.collection('standups').add(standup_data)
+        
+        # Get all today's standups for team summary
+        today_standups = db.collection('standups').where('team_id', '==', team_id)\
+                           .where('company_id', '==', company_id)\
+                           .where('date', '==', today).get()
+
+        standup_entries = []
+        for doc in today_standups:
+            entry = doc.to_dict()
+            standup_entries.append(entry)
+        
+        # Generate team summary
+        team_summary = generate_team_summary(standup_entries)
+        
+        # Emit real-time update
+        socketio.emit('standup_submitted', {
+            'user_email': user_email,
+            'team_id': team_id,
+            'sentiment': sentiment_analysis,
+            'has_blockers': blocker_analysis.get('has_blockers', False)
+        }, room=f"team_{company_id}_{team_id}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Standup submitted successfully',
+            'blocker_analysis': blocker_analysis,
+            'sentiment': sentiment_analysis,
+            'team_summary': team_summary,
+            'team_standup_count': len(standup_entries)
+        })
+        
+    except Exception as e:
+        print(f"Error submitting standup: {e}")
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/standups', methods=['GET'])
+@require_auth
+def get_standups():
+    """Get standups for a team"""
+    try:
+        company_id = request.company_id
+        team_id = request.args.get('team_id')
+        
+        if not team_id:
+            return jsonify({'error': 'team_id is required'}), 400
+        
+        track_user_action('view_standups', {'team_id': team_id}, team_id)
+        
+        # Get last 7 days of standups
+        end_date = datetime.utcnow()
+        start_date = end_date - timedelta(days=7)
+        
+        standups_ref = db.collection('standups')
+        query = standups_ref.where('team_id', '==', team_id)\
+                          .where('company_id', '==', company_id)\
+                          .where('date', '>=', start_date.strftime('%Y-%m-%d'))\
+                          .order_by('date', direction=firestore.Query.DESCENDING)
+        
+        standups = list(query.stream())
+        
+        standup_list = []
+        for standup in standups:
+            standup_data = standup.to_dict()
+            standup_data['id'] = standup.id
+            standup_data['time'] = 'recently'  # Simple time display
+            standup_list.append(standup_data)
+        
+        return jsonify({'success': True, 'standups': standup_list})
+        
+    except Exception as e:
+        print(f"Error fetching standups: {str(e)}")
+        return jsonify({'success': False, 'error': 'Failed to fetch standups'}), 500
+
+# ===== DASHBOARD ROUTES =====
+@app.route('/api/dashboard', methods=['GET'])
+@require_auth
+def get_dashboard():
+    """Get enhanced dashboard data for current user in current company"""
+    try:
+        user_id = request.user_id
+        company_id = request.company_id
+        team_id = request.args.get('team_id')
+        
+        if not team_id:
+            return jsonify({'error': 'team_id is required'}), 400
+        
+        track_user_action('view_dashboard', {'team_id': team_id}, team_id)
+        
+        # Verify team belongs to current company
+        team_ref = db.collection('teams').document(team_id)
+        team_doc = team_ref.get()
+        if not team_doc.exists or team_doc.to_dict().get('company_id') != company_id:
+            return jsonify({'error': 'Team not found or access denied'}), 403
+        
+        # Get today's date
+        today = datetime.utcnow().strftime('%Y-%m-%d')
+        
+        # Get today's standups for the team in current company
+        team_standups = db.collection('standups').where('team_id', '==', team_id)\
+                         .where('company_id', '==', company_id)\
+                         .where('date', '==', today).get()
+        
+        standup_count = len(list(team_standups))
+        
+        # Enhanced analysis of standups
+        team_summary = ""
+        sentiment_data = {'positive': 0, 'neutral': 0, 'negative': 0}
+        active_blockers = []
+        blocker_severity_counts = {'high': 0, 'medium': 0, 'low': 0}
+        
+        if standup_count > 0:
+            standup_entries = []
+            all_sentiments = []
+            
+            for doc in team_standups:
+                entry = doc.to_dict()
+                standup_entries.append({
+                    'user': entry.get('user_email', 'Unknown'),
+                    'yesterday': entry.get('yesterday', ''),
+                    'today': entry.get('today', ''),
+                    'blockers': entry.get('blockers', '')
+                })
+                
+                # Collect enhanced blocker data
+                blocker_analysis = entry.get('blocker_analysis', {})
+                if blocker_analysis.get('has_blockers'):
+                    severity = blocker_analysis.get('severity', 'low')
+                    blocker_severity_counts[severity] += 1
+                    
+                    for blocker in blocker_analysis.get('blockers', []):
+                        active_blockers.append({
+                            'user': entry.get('user_email', 'Unknown'),
+                            'text': blocker.get('context', ''),
+                            'severity': blocker.get('severity', 'low'),
+                            'keyword': blocker.get('keyword', '')
+                        })
+                
+                # Collect sentiment data  
+                sentiment_analysis = entry.get('sentiment_analysis', {})
+                sentiment = sentiment_analysis.get('sentiment', 'neutral')
+                all_sentiments.append(sentiment)
+                if sentiment in sentiment_data:
+                    sentiment_data[sentiment] += 1
+            
+            # Generate team summary
+            team_summary = generate_team_summary(standup_entries)
+        
+        # Calculate sentiment percentages
+        total_sentiments = sum(sentiment_data.values())
+        sentiment_percentages = {}
+        for sentiment, count in sentiment_data.items():
+            sentiment_percentages[sentiment] = round((count / total_sentiments * 100), 1) if total_sentiments > 0 else 0
+        
+        # Get recent retrospectives
+        recent_retros = []
+        try:
+            retros_ref = db.collection('retrospectives')
+            retros_query = retros_ref.where('team_id', '==', team_id)\
+                                   .where('company_id', '==', company_id)\
+                                   .order_by('created_at', direction=firestore.Query.DESCENDING)\
+                                   .limit(3)
+            for retro in retros_query.stream():
+                retro_data = retro.to_dict()
+                recent_retros.append({
+                    'id': retro.id,
+                    'sprint_name': retro_data.get('sprint_name', 'Sprint Retrospective'),
+                    'created_at': retro_data.get('created_at'),
+                    'action_items_count': len(retro_data.get('action_items', []))
+                })
+        except Exception as e:
+            print(f"Error fetching retrospectives: {e}")
+        
+        # Get recent standups for history
+        recent_standups = []
+        try:
+            week_ago = (datetime.utcnow() - timedelta(days=7)).strftime('%Y-%m-%d')
+            recent_standups_query = db.collection('standups')\
+                                    .where('team_id', '==', team_id)\
+                                    .where('company_id', '==', company_id)\
+                                    .where('date', '>=', week_ago)\
+                                    .order_by('date', direction=firestore.Query.DESCENDING)\
+                                    .limit(10)
+            
+            for standup in recent_standups_query.stream():
+                standup_data = standup.to_dict()
+                recent_standups.append({
+                    'user': standup_data.get('user_email', 'Unknown'),
+                    'date': standup_data.get('date'),
+                    'sentiment': standup_data.get('sentiment_analysis', {}).get('sentiment', 'neutral'),
+                    'has_blockers': standup_data.get('blocker_analysis', {}).get('has_blockers', False)
+                })
+        except Exception as e:
+            print(f"Error fetching recent standups: {e}")
+        
+        # Get velocity and completion metrics
+        velocity_data = {'velocity': 0, 'trend': 'unknown'}
+        completion_data = {'completion_rate': 0, 'total_tasks': 0}
+        
+        try:
+            # Get last completed sprint for velocity
+            sprints_ref = db.collection('sprints')
+            completed_sprints = sprints_ref.where('team_id', '==', team_id)\
+                                         .where('company_id', '==', company_id)\
+                                         .where('status', '==', 'completed')\
+                                         .order_by('completed_at', direction=firestore.Query.DESCENDING)\
+                                         .limit(2).stream()
+            
+            completed_sprints_list = list(completed_sprints)
+            if completed_sprints_list:
+                latest_sprint = completed_sprints_list[0].to_dict()
+                velocity_data['velocity'] = latest_sprint.get('final_analytics', {}).get('velocity', 0)
+                
+                # Calculate trend if we have multiple sprints
+                if len(completed_sprints_list) > 1:
+                    previous_sprint = completed_sprints_list[1].to_dict()
+                    prev_velocity = previous_sprint.get('final_analytics', {}).get('velocity', 0)
+                    current_velocity = velocity_data['velocity']
+                    
+                    if current_velocity > prev_velocity:
+                        velocity_data['trend'] = 'up'
+                    elif current_velocity < prev_velocity:
+                        velocity_data['trend'] = 'down'
+                    else:
+                        velocity_data['trend'] = 'stable'
+            
+            # Get current week task completion
+            week_start = datetime.utcnow() - timedelta(days=7)
+            week_tasks = db.collection('tasks')\
+                          .where('company_id', '==', company_id)\
+                          .where('created_at', '>=', week_start.strftime('%Y-%m-%d'))\
+                          .stream()
+            
+            total_tasks = 0
+            completed_tasks = 0
+            for task in week_tasks:
+                task_data = task.to_dict()
+                # Check if task belongs to team's sprint
+                sprint_id = task_data.get('sprint_id')
+                if sprint_id:
+                    sprint_ref = db.collection('sprints').document(sprint_id)
+                    sprint_doc = sprint_ref.get()
+                    if sprint_doc.exists and sprint_doc.to_dict().get('team_id') == team_id:
+                        total_tasks += 1
+                        if task_data.get('status') == 'done':
+                            completed_tasks += 1
+            
+            completion_data = {
+                'completion_rate': round((completed_tasks / total_tasks * 100), 1) if total_tasks > 0 else 0,
+                'total_tasks': total_tasks
+            }
+            
+        except Exception as e:
+            print(f"Error calculating metrics: {e}")
+        
+        # Get active sprint
+        active_sprint = None
+        try:
+            active_sprint_query = db.collection('sprints')\
+                                   .where('team_id', '==', team_id)\
+                                   .where('company_id', '==', company_id)\
+                                   .where('status', '==', 'active')\
+                                   .limit(1)
+            
+            for sprint in active_sprint_query.stream():
+                sprint_data = sprint.to_dict()
+                
+                # Get tasks for progress calculation
+                tasks_query = db.collection('tasks').where('sprint_id', '==', sprint.id)
+                tasks = list(tasks_query.stream())
+                
+                total_tasks = len(tasks)
+                completed_tasks = sum(1 for task in tasks if task.to_dict().get('status') == 'done')
+                
+                active_sprint = {
+                    'id': sprint.id,
+                    'name': sprint_data.get('name', 'Current Sprint'),
+                    'start_date': sprint_data.get('start_date'),
+                    'end_date': sprint_data.get('end_date'),
+                    'total_tasks': total_tasks,
+                    'completed_tasks': completed_tasks,
+                    'progress': round((completed_tasks / total_tasks * 100), 1) if total_tasks > 0 else 0
+                }
+        except Exception as e:
+            print(f"Error fetching active sprint: {e}")
+            active_sprint = None
+        
+        dashboard_data = {
+            'standup_count': standup_count, 
+            'team_summary': team_summary,
+            'active_sprint': active_sprint,
+            'recent_standups': recent_standups,
+            'recent_retros': recent_retros,
+            'sentiment_analysis': {
+                'distribution': sentiment_data,
+                'percentages': sentiment_percentages,
+                'dominant_sentiment': max(sentiment_data.items(), key=lambda x: x[1])[0] if total_sentiments > 0 else 'neutral'
+            },
+            'blocker_analysis': {
+                'active_blockers': active_blockers[:5],  # Show top 5
+                'severity_counts': blocker_severity_counts,
+                'total_blockers': len(active_blockers)
+            },
+            'quick_metrics': {
+                'sprint_velocity': velocity_data.get('velocity', 0),
+                'velocity_trend': velocity_data.get('trend', 'unknown'),
+                'completion_rate': completion_data.get('completion_rate', 0),
+                'total_tasks_week': completion_data.get('total_tasks', 0)
+            }
+        }
+        
+        return jsonify({
+            'success': True,
+            'dashboard': dashboard_data
+        })
+        
+    except Exception as e:
+        print(f"Error fetching dashboard data: {str(e)}")
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': 'Failed to fetch dashboard data'
+        }), 500
+
+# ===== SPRINT ROUTES =====
+@app.route('/api/sprints', methods=['GET'])
+@require_auth
+def get_sprints():
+    try:
+        # Check database connection
+        if not db:
+            return jsonify({'error': 'Database connection not available'}), 503
+        
+        company_id = request.company_id
+        team_id = request.args.get('team_id')
+        if not team_id:
+            return jsonify({'error': 'team_id is required'}), 400
+        
+        track_user_action('view_sprints', {'team_id': team_id}, team_id)
+        
+        sprints_ref = db.collection('sprints')
+        query = sprints_ref.where('team_id', '==', team_id).where('company_id', '==', company_id)
+        sprints = query.stream()
+        
+        sprint_list = []
+        for sprint in sprints:
+            sprint_data = sprint.to_dict()
+            sprint_data['id'] = sprint.id
+            
+            # Get tasks for this sprint
+            tasks_ref = db.collection('tasks')
+            tasks_query = tasks_ref.where('sprint_id', '==', sprint.id)
+            tasks = list(tasks_query.stream())
+            sprint_data['tasks'] = []
+            
+            # Calculate sprint metrics
+            total_story_points = 0
+            completed_story_points = 0
+            task_status_counts = {'todo': 0, 'in_progress': 0, 'done': 0}
+            
+            for task in tasks:
+                task_data = task.to_dict()
+                task_data['id'] = task.id
+                sprint_data['tasks'].append(task_data)
+                
+                # Track task metrics
+                story_points = task_data.get('estimate', 1)
+                status = task_data.get('status', 'todo')
+                
+                total_story_points += story_points
+                if status in task_status_counts:
+                    task_status_counts[status] += 1
+                
+                if status == 'done':
+                    completed_story_points += story_points
+            
+            # Calculate completion percentage
+            completion_percentage = (completed_story_points / total_story_points * 100) if total_story_points > 0 else 0
+            
+            # Add analytics to sprint data
+            sprint_data['analytics'] = {
+                'total_story_points': total_story_points,
+                'completed_story_points': completed_story_points,
+                'completion_percentage': round(completion_percentage, 1),
+                'task_counts': task_status_counts,
+                'total_tasks': len(tasks)
+            }
+            
+            # Get comments for this sprint
+            comments_ref = db.collection('sprint_comments')
+            comments_query = comments_ref.where('sprint_id', '==', sprint.id)\
+                                       .order_by('created_at', direction=firestore.Query.DESCENDING)
+            comments = list(comments_query.stream())
+            
+            sprint_data['comments'] = []
+            for comment in comments:
+                comment_data = comment.to_dict()
+                comment_data['id'] = comment.id
+                comment_data['time'] = 'recently'  # Simple time display
+                sprint_data['comments'].append(comment_data)
+            
+            sprint_list.append(sprint_data)
+        
+        return jsonify({'success': True, 'sprints': sprint_list})
+        
+    except Exception as e:
+        print(f"Error fetching sprints: {str(e)}")
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': 'Failed to fetch sprints'}), 500
+
+@app.route('/api/sprints', methods=['POST'])
+@require_auth
+def create_sprint():
+    try:
+        data = request.json
+        company_id = request.company_id
+        
+        track_user_action('create_sprint', {'team_id': data.get('team_id')})
+        
+        sprint_data = {
+            'team_id': data.get('team_id'),
+            'company_id': company_id,
+            'name': data.get('name'),
+            'goal': data.get('goal', ''),
+            'start_date': data.get('start_date'),
+            'end_date': data.get('end_date'),
+            'status': 'active',
+            'created_by': request.user_id,
+            'created_at': datetime.utcnow().isoformat()
+        }
+        
+        if not all([sprint_data['team_id'], sprint_data['name'], sprint_data['start_date'], sprint_data['end_date']]):
+            return jsonify({'error': 'Missing required fields'}), 400
+        
+        doc_ref = db.collection('sprints').add(sprint_data)
+        sprint_data['id'] = doc_ref[1].id
+        
+        return jsonify({'success': True, 'sprint': sprint_data})
+    except Exception as e:
+        print(f"Error creating sprint: {str(e)}")
+        return jsonify({'success': False, 'error': 'Failed to create sprint'}), 500
+
+@app.route('/api/sprints/<sprint_id>/complete', methods=['POST'])
+@require_auth
+def complete_sprint(sprint_id):
+    """Mark sprint as completed and calculate final analytics"""
+    try:
+        # Check database connection
+        if not db:
+            print("Database connection not available")
+            return jsonify({'success': False, 'error': 'Database connection not available'}), 503
+            
+        print(f"Completing sprint: {sprint_id}")
+        
+        track_user_action('complete_sprint', {'sprint_id': sprint_id})
+        
+        sprint_ref = db.collection('sprints').document(sprint_id)
+        sprint_doc = sprint_ref.get()
+        
+        if not sprint_doc.exists:
+            print(f"Sprint {sprint_id} not found")
+            return jsonify({'error': 'Sprint not found'}), 404
+        
+        sprint_data = sprint_doc.to_dict()
+        print(f"Completing sprint: {sprint_data.get('name', 'Unnamed')}")
+        
+        # Calculate final sprint metrics
+        tasks_ref = db.collection('tasks')
+        tasks_query = tasks_ref.where('sprint_id', '==', sprint_id)
+        tasks = list(tasks_query.stream())
+        
+        print(f"Found {len(tasks)} tasks for sprint")
+        
+        total_story_points = 0
+        completed_story_points = 0
+        task_status_counts = {'todo': 0, 'in_progress': 0, 'done': 0}
+        
+        for task in tasks:
+            task_data = task.to_dict()
+            story_points = task_data.get('estimate', 1)
+            status = task_data.get('status', 'todo')
+            
+            total_story_points += story_points
+            if status in task_status_counts:
+                task_status_counts[status] += 1
+            
+            if status == 'done':
+                completed_story_points += story_points
+        
+        completion_percentage = (completed_story_points / total_story_points * 100) if total_story_points > 0 else 0
+        
+        print(f"Sprint metrics: {completed_story_points}/{total_story_points} points ({completion_percentage:.1f}%)")
+        
+        # Update sprint with completion data
+        update_data = {
+            'status': 'completed',
+            'completed_at': datetime.utcnow().isoformat(),
+            'final_analytics': {
+                'total_story_points': total_story_points,
+                'completed_story_points': completed_story_points,
+                'completion_percentage': round(completion_percentage, 1),
+                'task_counts': task_status_counts,
+                'total_tasks': len(tasks),
+                'velocity': completed_story_points
+            }
+        }
+        
+        sprint_ref.update(update_data)
+        print(f"Sprint {sprint_id} marked as completed")
+        
+        return jsonify({
+            'success': True, 
+            'message': 'Sprint completed successfully',
+            'final_analytics': update_data['final_analytics']
+        })
+        
+    except Exception as e:
+        print(f"Error completing sprint: {str(e)}")
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': 'Failed to complete sprint'}), 500
+
+# ===== TASK ROUTES =====
+@app.route('/api/tasks', methods=['POST'])
+@require_auth
+def create_task():
+    try:
+        data = request.json
+        company_id = request.company_id
+        
+        track_user_action('create_task', {'sprint_id': data.get('sprint_id')})
+        
+        task_data = {
+            'sprint_id': data.get('sprint_id'),
+            'company_id': company_id,
+            'title': data.get('title'),
+            'assignee': data.get('assignee', 'Unassigned'),
+            'status': data.get('status', 'todo'),
+            'estimate': int(data.get('estimate', 1)),
+            'created_by': request.user_id,
+            'created_at': datetime.utcnow().isoformat()
+        }
+        
+        if not all([task_data['sprint_id'], task_data['title']]):
+            return jsonify({'error': 'Missing required fields'}), 400
+        
+        doc_ref = db.collection('tasks').add(task_data)
+        task_data['id'] = doc_ref[1].id
+        
+        # Emit real-time update
+        socketio.emit('task_created', {
+            'task': task_data,
+            'sprint_id': task_data['sprint_id']
+        }, room=f'sprint_{task_data["sprint_id"]}')
+        
+        return jsonify({'success': True, 'task': task_data})
+    except Exception as e:
+        print(f"Error creating task: {str(e)}")
+        return jsonify({'success': False, 'error': 'Failed to create task'}), 500
+
+@app.route('/api/tasks/<task_id>', methods=['PUT'])
+@require_auth
+def update_task(task_id):
+    try:
+        data = request.json
+        
+        track_user_action('update_task', {'task_id': task_id, 'new_status': data.get('status')})
+        
+        task_ref = db.collection('tasks').document(task_id)
+        task_doc = task_ref.get()
+        
+        if not task_doc.exists:
+            return jsonify({'error': 'Task not found'}), 404
+        
+        update_data = {
+            'updated_at': datetime.utcnow().isoformat()
+        }
+        
+        # Track status changes for analytics
+        old_task_data = task_doc.to_dict()
+        old_status = old_task_data.get('status')
+        new_status = data.get('status')
+        
+        # Update allowed fields
+        allowed_fields = ['title', 'assignee', 'status', 'estimate']
+        for field in allowed_fields:
+            if field in data:
+                update_data[field] = data[field]
+        
+        task_ref.update(update_data)
+        
+        # Get updated task data
+        updated_task = task_ref.get().to_dict()
+        updated_task['id'] = task_id
+        
+        # Emit real-time update
+        socketio.emit('task_updated', {
+            'task': updated_task,
+            'sprint_id': updated_task['sprint_id'],
+            'status_change': {
+                'old_status': old_status,
+                'new_status': new_status
+            }
+        }, room=f'sprint_{updated_task["sprint_id"]}')
+        
+        return jsonify({'success': True, 'task': updated_task})
+    except Exception as e:
+        print(f"Error updating task: {str(e)}")
+        return jsonify({'success': False, 'error': 'Failed to update task'}), 500
+
+@app.route('/api/tasks/<task_id>', methods=['DELETE'])
+@require_auth
+def delete_task(task_id):
+    try:
+        task_ref = db.collection('tasks').document(task_id)
+        task_doc = task_ref.get()
+        
+        if not task_doc.exists:
+            return jsonify({'error': 'Task not found'}), 404
+        
+        task_data = task_doc.to_dict()
+        sprint_id = task_data.get('sprint_id')
+        
+        track_user_action('delete_task', {'task_id': task_id, 'sprint_id': sprint_id})
+        
+        task_ref.delete()
+        
+        # Emit real-time update
+        socketio.emit('task_deleted', {
+            'task_id': task_id,
+            'sprint_id': sprint_id
+        }, room=f'sprint_{sprint_id}')
+        
+        return jsonify({'success': True, 'message': 'Task deleted'})
+    except Exception as e:
+        print(f"Error deleting task: {str(e)}")
+        return jsonify({'success': False, 'error': 'Failed to delete task'}), 500
+
+# ===== COMMENT ROUTES =====
+@app.route('/api/sprints/<sprint_id>/comments', methods=['POST'])
+@require_auth
+def add_sprint_comment(sprint_id):
+    try:
+        # Check database connection
+        if not db:
+            print("Database connection not available")
+            return jsonify({'success': False, 'error': 'Database connection not available'}), 503
+            
+        data = request.json
+        company_id = request.company_id
+        
+        print(f"Adding comment to sprint_id: {sprint_id}, company_id: {company_id}")
+        
+        track_user_action('add_comment', {'sprint_id': sprint_id})
+        
+        comment_data = {
+            'sprint_id': sprint_id,
+            'company_id': company_id,
+            'author': data.get('author', 'Anonymous'),
+            'text': data.get('text'),
+            'created_by': request.user_id,
+            'created_at': datetime.utcnow().isoformat()
+        }
+        
+        print(f"Comment data: {comment_data}")
+        
+        if not comment_data['text']:
+            print("Comment text is required")
+            return jsonify({'error': 'Comment text is required'}), 400
+        
+        print("Adding comment to database...")
+        doc_ref = db.collection('sprint_comments').add(comment_data)
+        comment_data['id'] = doc_ref[1].id
+        comment_data['time'] = 'just now'  # For UI compatibility
+        
+        print(f"Comment created with id: {comment_data['id']}")
+        
+        # Emit real-time update
+        try:
+            socketio.emit('comment_added', {
+                'comment': comment_data,
+                'sprint_id': sprint_id
+            }, room=f'sprint_{sprint_id}')
+        except Exception as socket_error:
+            print(f"Socket emit error: {socket_error}")
+            # Don't fail the request if socket fails
+        
+        return jsonify({'success': True, 'comment': comment_data})
+    except Exception as e:
+        print(f"Error adding comment: {str(e)}")
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': 'Failed to add comment'}), 500
+
+@app.route('/api/sprints/<sprint_id>/comments', methods=['GET'])
+@require_auth
+def get_sprint_comments(sprint_id):
+    try:
+        track_user_action('view_comments', {'sprint_id': sprint_id})
+        
+        comments_ref = db.collection('sprint_comments')
+        query = comments_ref.where('sprint_id', '==', sprint_id)\
+                          .order_by('created_at', direction=firestore.Query.DESCENDING)
+        comments = query.stream()
+        
+        comment_list = []
+        for comment in comments:
+            comment_data = comment.to_dict()
+            comment_data['id'] = comment.id
+            comment_data['time'] = 'recently'  # Simple time display
+            comment_list.append(comment_data)
+        
+        return jsonify({'success': True, 'comments': comment_list})
+    except Exception as e:
+        print(f"Error fetching comments: {str(e)}")
+        return jsonify({'success': False, 'error': 'Failed to fetch comments'}), 500
+
+# ===== RETROSPECTIVE ROUTES =====
+@app.route('/api/retrospectives', methods=['POST'])
+@require_auth
+def create_retrospective():
+    """Create a retrospective session"""
+    try:
+        data = request.get_json()
+        company_id = request.company_id
+        team_id = data.get('team_id')
+        
+        if not team_id:
+            return jsonify({'error': 'team_id is required'}), 400
+        
+        track_user_action('create_retrospective', {'team_id': team_id}, team_id)
+        
+        # Verify team belongs to current company
+        team_ref = db.collection('teams').document(team_id)
+        team_doc = team_ref.get()
+        if not team_doc.exists or team_doc.to_dict().get('company_id') != company_id:
+            return jsonify({'error': 'Team not found or access denied'}), 403
+        
+        retro_data = {
+            'team_id': team_id,
+            'company_id': company_id,
+            'sprint_name': data.get('sprint_name', ''),
+            'what_went_well': data.get('what_went_well', []),
+            'what_could_improve': data.get('what_could_improve', []),
+            'action_items': data.get('action_items', []),
+            'created_by': request.user_id,
+            'created_at': firestore.SERVER_TIMESTAMP
+        }
+        
+        # Save retrospective
+        doc_ref = db.collection('retrospectives').add(retro_data)
+        retro_id = doc_ref[1].id
+        
+        return jsonify({
+            'success': True,
+            'retrospective_id': retro_id,
+            'message': 'Retrospective created successfully'
+        })
+        
+    except Exception as e:
+        print(f"Error creating retrospective: {str(e)}")
+        return jsonify({'success': False, 'error': 'Failed to create retrospective'}), 500
+
+@app.route('/api/retrospectives', methods=['GET'])
+@require_auth
+def get_retrospectives():
+    """Get retrospectives for a team"""
+    try:
+        company_id = request.company_id
+        team_id = request.args.get('team_id')
+        
+        if not team_id:
+            return jsonify({'error': 'team_id is required'}), 400
+        
+        track_user_action('view_retrospectives', {'team_id': team_id}, team_id)
+        
+        retros_ref = db.collection('retrospectives')
+        query = retros_ref.where('team_id', '==', team_id)\
+                         .where('company_id', '==', company_id)\
+                         .order_by('created_at', direction=firestore.Query.DESCENDING)\
+                         .limit(10)
+        
+        retros = query.stream()
+        
+        retro_list = []
+        for retro in retros:
+            retro_data = retro.to_dict()
+            retro_data['id'] = retro.id
+            retro_list.append(retro_data)
+        
+        return jsonify({'success': True, 'retrospectives': retro_list})
+        
+    except Exception as e:
+        print(f"Error fetching retrospectives: {str(e)}")
+        return jsonify({'success': False, 'error': 'Failed to fetch retrospectives'}), 500
+
+@app.route('/api/retrospective-feedback', methods=['POST'])
+@require_auth
+def submit_retrospective_feedback():
+    """Submit retrospective feedback with AI analysis"""
+    try:
+        # Check database connection
+        if not db:
+            print("Database connection not available")
+            return jsonify({'success': False, 'error': 'Database connection not available'}), 503
+            
+        data = request.get_json()
+        company_id = request.company_id
+        team_id = data.get('team_id')
+        
+        if not team_id:
+            return jsonify({'error': 'team_id is required'}), 400
+        
+        track_user_action('submit_retrospective_feedback', {'team_id': team_id}, team_id)
+        
+        # Verify team belongs to current company
+        team_ref = db.collection('teams').document(team_id)
+        team_doc = team_ref.get()
+        if not team_doc.exists or team_doc.to_dict().get('company_id') != company_id:
+            return jsonify({'error': 'Team not found or access denied'}), 403
+        
+        feedback_data = {
+            'team_id': team_id,
+            'company_id': company_id,
+            'category': data.get('category'),  # went_well, could_improve, action_items
+            'feedback': data.get('feedback'),
+            'anonymous': data.get('anonymous', True),
+            'created_by': request.user_id if not data.get('anonymous') else None,
+            'created_at': firestore.SERVER_TIMESTAMP
+        }
+        
+        # Basic AI analysis for the feedback
+        feedback_text = feedback_data['feedback']
+        category = feedback_data['category']
+        
+        analysis = {
+            'themes': [{
+                'title': f"{category.replace('_', ' ').title()} Feedback",
+                'sentiment': 'positive' if category == 'went_well' else 'neutral' if category == 'action_items' else 'negative',
+                'items': [feedback_text],
+                'actionable': category == 'action_items' or 'should' in feedback_text.lower()
+            }],
+            'overall_sentiment': f"Team member provided {category.replace('_', ' ')} feedback",
+            'suggested_actions': [f"Review and discuss: {feedback_text[:50]}..."] if len(feedback_text) > 50 else [f"Review: {feedback_text}"]
+        }
+        
+        # Save to Firestore
+        doc_ref = db.collection('retrospective_feedback').add(feedback_data)
+        
+        # Emit real-time update
+        socketio.emit('retrospective_feedback_added', {
+            'feedback_id': doc_ref[1].id,
+            'team_id': team_id,
+            'category': category,
+            'anonymous': feedback_data['anonymous']
+        }, room=f"team_{company_id}_{team_id}")
+        
+        return jsonify({
+            'success': True,
+            'feedback_id': doc_ref[1].id,
+            'analysis': analysis,
+            'message': 'Feedback submitted successfully'
+        })
+        
+    except Exception as e:
+        print(f"Error submitting retrospective feedback: {str(e)}")
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': 'Failed to submit feedback'}), 500
+
+@app.route('/api/retrospective-feedback', methods=['GET'])
+@require_auth
+def get_retrospective_feedback():
+    """Get retrospective feedback for a team"""
+    try:
+        company_id = request.company_id
+        team_id = request.args.get('team_id')
+        
+        if not team_id:
+            return jsonify({'error': 'team_id is required'}), 400
+        
+        track_user_action('view_retrospective_feedback', {'team_id': team_id}, team_id)
+        
+        feedback_ref = db.collection('retrospective_feedback')
+        query = feedback_ref.where('team_id', '==', team_id)\
+                           .where('company_id', '==', company_id)\
+                           .order_by('created_at', direction=firestore.Query.DESCENDING)
+        
+        feedback_docs = query.stream()
+        
+        feedback_list = []
+        for feedback in feedback_docs:
+            feedback_data = feedback.to_dict()
+            feedback_data['id'] = feedback.id
+            
+            # Don't expose user info for anonymous feedback
+            if feedback_data.get('anonymous', True):
+                feedback_data.pop('created_by', None)
+            
+            feedback_list.append(feedback_data)
+        
+        # Group feedback by category
+        categorized_feedback = {
+            'went_well': [],
+            'could_improve': [],
+            'action_items': []
+        }
+        
+        for feedback in feedback_list:
+            category = feedback.get('category', 'could_improve')
+            if category in categorized_feedback:
+                categorized_feedback[category].append(feedback)
+        
+        return jsonify({
+            'success': True,
+            'feedback': categorized_feedback,
+            'total_count': len(feedback_list)
+        })
+        
+    except Exception as e:
+        print(f"Error fetching retrospective feedback: {str(e)}")
+        return jsonify({'success': False, 'error': 'Failed to fetch feedback'}), 500
+
+# ===== ANALYTICS ROUTES =====
+@app.route('/api/analytics/team-velocity', methods=['GET'])
+@require_auth
+def get_team_velocity():
+    """Get team velocity analytics"""
+    try:
+        company_id = request.company_id
+        team_id = request.args.get('team_id')
+        
+        if not team_id:
+            return jsonify({'error': 'team_id is required'}), 400
+        
+        track_user_action('view_velocity_analytics', {'team_id': team_id}, team_id)
+        
+        # Get completed sprints for velocity calculation
+        sprints_ref = db.collection('sprints')
+        completed_sprints = sprints_ref.where('team_id', '==', team_id)\
+                                     .where('company_id', '==', company_id)\
+                                     .where('status', '==', 'completed')\
+                                     .order_by('completed_at', direction=firestore.Query.DESCENDING)\
+                                     .limit(10)
+        
+        velocity_data = []
+        for sprint in completed_sprints.stream():
+            sprint_data = sprint.to_dict()
+            final_analytics = sprint_data.get('final_analytics', {})
+            
+            velocity_data.append({
+                'sprint_name': sprint_data.get('name', 'Sprint'),
+                'velocity': final_analytics.get('velocity', 0),
+                'completion_percentage': final_analytics.get('completion_percentage', 0),
+                'total_tasks': final_analytics.get('total_tasks', 0),
+                'completed_at': sprint_data.get('completed_at')
+            })
+        
+        # Calculate average velocity
+        velocities = [sprint['velocity'] for sprint in velocity_data if sprint['velocity'] > 0]
+        avg_velocity = statistics.mean(velocities) if velocities else 0
+        
+        return jsonify({
+            'success': True,
+            'velocity_data': velocity_data,
+            'average_velocity': round(avg_velocity, 1),
+            'sprint_count': len(velocity_data)
+        })
+        
+    except Exception as e:
+        print(f"Error fetching velocity analytics: {str(e)}")
+        return jsonify({'success': False, 'error': 'Failed to fetch velocity data'}), 500
+
+@app.route('/api/analytics/sentiment-trends', methods=['GET'])
+@require_auth
+def get_sentiment_trends():
+    """Get team sentiment trends over time"""
+    try:
+        company_id = request.company_id
+        team_id = request.args.get('team_id')
+        
+        if not team_id:
+            return jsonify({'error': 'team_id is required'}), 400
+        
+        track_user_action('view_sentiment_analytics', {'team_id': team_id}, team_id)
+        
+        # Get last 30 days of standups
+        end_date = datetime.utcnow()
+        start_date = end_date - timedelta(days=30)
+        
+        standups_ref = db.collection('standups')
+        query = standups_ref.where('team_id', '==', team_id)\
+                          .where('company_id', '==', company_id)\
+                          .where('date', '>=', start_date.strftime('%Y-%m-%d'))\
+                          .order_by('date')
+        
+        standups = query.stream()
+        
+        # Group by date and calculate daily sentiment
+        daily_sentiment = defaultdict(list)
+        
+        for standup in standups:
+            standup_data = standup.to_dict()
+            date = standup_data.get('date')
+            sentiment_analysis = standup_data.get('sentiment_analysis', {})
+            sentiment = sentiment_analysis.get('sentiment', 'neutral')
+            
+            daily_sentiment[date].append(sentiment)
+        
+        # Calculate sentiment trends
+        trend_data = []
+        for date, sentiments in daily_sentiment.items():
+            sentiment_counts = Counter(sentiments)
+            
+            trend_data.append({
+                'date': date,
+                'positive': sentiment_counts.get('positive', 0),
+                'neutral': sentiment_counts.get('neutral', 0),
+                'negative': sentiment_counts.get('negative', 0),
+                'total_standups': len(sentiments)
+            })
+        
+        # Sort by date
+        trend_data.sort(key=lambda x: x['date'])
+        
+        return jsonify({
+            'success': True,
+            'sentiment_trends': trend_data,
+            'date_range': {
+                'start': start_date.strftime('%Y-%m-%d'),
+                'end': end_date.strftime('%Y-%m-%d')
+            }
+        })
+        
+    except Exception as e:
+        print(f"Error fetching sentiment trends: {str(e)}")
+        return jsonify({'success': False, 'error': 'Failed to fetch sentiment trends'}), 500
+
+@app.route('/api/analytics/blocker-summary', methods=['GET'])
+@require_auth
+def get_blocker_summary():
+    """Get team blocker analytics"""
+    try:
+        company_id = request.company_id
+        team_id = request.args.get('team_id')
+        
+        if not team_id:
+            return jsonify({'error': 'team_id is required'}), 400
+        
+        track_user_action('view_blocker_analytics', {'team_id': team_id}, team_id)
+        
+        # Get last 30 days of standups with blockers
+        end_date = datetime.utcnow()
+        start_date = end_date - timedelta(days=30)
+        
+        standups_ref = db.collection('standups')
+        query = standups_ref.where('team_id', '==', team_id)\
+                          .where('company_id', '==', company_id)\
+                          .where('date', '>=', start_date.strftime('%Y-%m-%d'))
+        
+        standups = query.stream()
+        
+        blocker_data = {
+            'total_standups': 0,
+            'standups_with_blockers': 0,
+            'blocker_severity_counts': {'high': 0, 'medium': 0, 'low': 0},
+            'common_blocker_keywords': {},
+            'blocker_trend': []
+        }
+        
+        daily_blockers = defaultdict(int)
+        
+        for standup in standups:
+            standup_data = standup.to_dict()
+            blocker_data['total_standups'] += 1
+            
+            blocker_analysis = standup_data.get('blocker_analysis', {})
+            if blocker_analysis.get('has_blockers'):
+                blocker_data['standups_with_blockers'] += 1
+                
+                # Count severity
+                severity = blocker_analysis.get('severity', 'low')
+                if severity in blocker_data['blocker_severity_counts']:
+                    blocker_data['blocker_severity_counts'][severity] += 1
+                
+                # Count common keywords
+                for blocker in blocker_analysis.get('blockers', []):
+                    keyword = blocker.get('keyword', '')
+                    if keyword:
+                        blocker_data['common_blocker_keywords'][keyword] = blocker_data['common_blocker_keywords'].get(keyword, 0) + 1
+                
+                # Daily trend
+                date = standup_data.get('date')
+                if date:
+                    daily_blockers[date] += 1
+        
+        # Convert daily blockers to trend data
+        for date, count in sorted(daily_blockers.items()):
+            blocker_data['blocker_trend'].append({
+                'date': date,
+                'blocker_count': count
+            })
+        
+        # Calculate percentage
+        blocker_percentage = (blocker_data['standups_with_blockers'] / blocker_data['total_standups'] * 100) if blocker_data['total_standups'] > 0 else 0
+        blocker_data['blocker_percentage'] = round(blocker_percentage, 1)
+        
+        return jsonify({
+            'success': True,
+            'blocker_analytics': blocker_data
+        })
+        
+    except Exception as e:
+        print(f"Error fetching blocker analytics: {str(e)}")
+        return jsonify({'success': False, 'error': 'Failed to fetch blocker analytics'}), 500
+
+@app.route('/api/analytics/productivity-metrics', methods=['GET'])
+@require_auth
+def get_productivity_metrics():
+    """Get team productivity metrics"""
+    try:
+        company_id = request.company_id
+        team_id = request.args.get('team_id')
+        
+        if not team_id:
+            return jsonify({'error': 'team_id is required'}), 400
+        
+        track_user_action('view_productivity_metrics', {'team_id': team_id}, team_id)
+        
+        # Get last 90 days of data
+        end_date = datetime.utcnow()
+        start_date = end_date - timedelta(days=90)
+        
+        # Get standups count per week
+        standups_ref = db.collection('standups')
+        standups_query = standups_ref.where('team_id', '==', team_id)\
+                                    .where('company_id', '==', company_id)\
+                                    .where('date', '>=', start_date.strftime('%Y-%m-%d'))
+        
+        standups = list(standups_query.stream())
+        
+        # Group standups by week
+        weekly_standups = defaultdict(int)
+        for standup in standups:
+            standup_data = standup.to_dict()
+            date_str = standup_data.get('date')
+            if date_str:
+                date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+                week_start = (date_obj - timedelta(days=date_obj.weekday())).strftime('%Y-%m-%d')
+                weekly_standups[week_start] += 1
+        
+        # Get sprint completion rates
+        sprints_ref = db.collection('sprints')
+        sprints_query = sprints_ref.where('team_id', '==', team_id)\
+                                  .where('company_id', '==', company_id)\
+                                  .where('status', '==', 'completed')
+        
+        completed_sprints = list(sprints_query.stream())
+        
+        sprint_completion_rates = []
+        total_velocity = 0
+        
+        for sprint in completed_sprints:
+            sprint_data = sprint.to_dict()
+            final_analytics = sprint_data.get('final_analytics', {})
+            completion_rate = final_analytics.get('completion_percentage', 0)
+            velocity = final_analytics.get('velocity', 0)
+            
+            sprint_completion_rates.append(completion_rate)
+            total_velocity += velocity
+        
+        # Calculate metrics
+        avg_completion_rate = statistics.mean(sprint_completion_rates) if sprint_completion_rates else 0
+        avg_velocity = total_velocity / len(completed_sprints) if completed_sprints else 0
+        avg_standups_per_week = statistics.mean(weekly_standups.values()) if weekly_standups else 0
+        
+        productivity_metrics = {
+            'average_sprint_completion': round(avg_completion_rate, 1),
+            'average_velocity': round(avg_velocity, 1),
+            'average_standups_per_week': round(avg_standups_per_week, 1),
+            'total_completed_sprints': len(completed_sprints),
+            'weekly_standup_trend': [
+                {'week': week, 'count': count} 
+                for week, count in sorted(weekly_standups.items())
+            ],
+            'sprint_completion_trend': [
+                {
+                    'sprint_name': sprint.to_dict().get('name', 'Sprint'),
+                    'completion_rate': sprint.to_dict().get('final_analytics', {}).get('completion_percentage', 0),
+                    'completed_at': sprint.to_dict().get('completed_at')
+                }
+                for sprint in completed_sprints[-10:]  # Last 10 sprints
+            ]
+        }
+        
+        return jsonify({
+            'success': True,
+            'productivity_metrics': productivity_metrics
+        })
+        
+    except Exception as e:
+        print(f"Error fetching productivity metrics: {str(e)}")
+        return jsonify({'success': False, 'error': 'Failed to fetch productivity metrics'}), 500
+
+# ===== TEAM MEMBER ROUTES =====
+@app.route('/api/teams/<team_id>/members', methods=['POST'])
+@require_auth
+def add_team_member(team_id):
+    """Add member to team (owner/manager only)"""
+    try:
+        user_id = request.user_id
+        data = request.get_json()
+        member_email = data.get('email', '').strip()
+        member_role = data.get('role', 'DEVELOPER')
+        
+        if not member_email:
+            return jsonify({'error': 'Member email is required'}), 400
         
         # Get team document
         team_ref = db.collection('teams').document(team_id)
         team_doc = team_ref.get()
         
         if not team_doc.exists:
-            return jsonify({
-                'success': False,
-                'error': 'Team not found'
-            }), 404
+            return jsonify({'error': 'Team not found'}), 404
         
         team_data = team_doc.to_dict()
         
-        # Check if user is a member
-        if user_id not in team_data.get('members', []):
-            return jsonify({
-                'success': False,
-                'error': 'You are not a member of this team'
-            }), 403
+        # Check if user has permission to add members
+        user_role = team_data.get('member_roles', {}).get(user_id, 'DEVELOPER')
+        if user_role not in ['OWNER', 'MANAGER']:
+            return jsonify({'error': 'Permission denied'}), 403
         
-        # Update user's role
-        member_roles = team_data.get('member_roles', {})
-        member_roles[user_id] = new_role
+        # Get member by email
+        try:
+            member_user = auth.get_user_by_email(member_email)
+            member_id = member_user.uid
+        except:
+            return jsonify({'error': 'User not found'}), 404
         
+        # Check if already a member
+        if member_id in team_data.get('members', []):
+            return jsonify({'error': 'User is already a team member'}), 400
+        
+        # Add member to team
         team_ref.update({
-            'member_roles': member_roles,
+            'members': firestore.ArrayUnion([member_id]),
+            f'member_roles.{member_id}': member_role,
+            f'member_joined.{member_id}': datetime.utcnow().isoformat(),
             'updated_at': datetime.utcnow().isoformat()
+        })
+        
+        track_user_action('add_team_member', {
+            'team_id': team_id,
+            'member_email': member_email,
+            'member_role': member_role
         })
         
         return jsonify({
             'success': True,
-            'message': f'Role updated to {new_role}'
+            'message': 'Member added successfully',
+            'member': {
+                'id': member_id,
+                'email': member_email,
+                'role': member_role,
+                'joined_at': datetime.utcnow().isoformat()
+            }
         })
         
     except Exception as e:
-        print(f"Error updating role: {str(e)}")
+        print(f"Error adding team member: {str(e)}")
+        return jsonify({'error': 'Failed to add team member'}), 500
+
+@app.route('/api/teams/<team_id>/members/<member_id>', methods=['DELETE'])
+@require_auth
+def remove_team_member(team_id, member_id):
+    """Remove member from team (owner only)"""
+    try:
+        user_id = request.user_id
+        
+        # Get team document
+        team_ref = db.collection('teams').document(team_id)
+        team_doc = team_ref.get()
+        
+        if not team_doc.exists:
+            return jsonify({'error': 'Team not found'}), 404
+        
+        team_data = team_doc.to_dict()
+        
+        # Check if user is owner
+        if team_data.get('owner_id') != user_id:
+            return jsonify({'error': 'Only team owner can remove members'}), 403
+        
+        # Can't remove owner
+        if member_id == team_data.get('owner_id'):
+            return jsonify({'error': 'Cannot remove team owner'}), 400
+        
+        # Remove member from team
+        team_ref.update({
+            'members': firestore.ArrayRemove([member_id]),
+            f'member_roles.{member_id}': firestore.DELETE_FIELD,
+            f'member_joined.{member_id}': firestore.DELETE_FIELD,
+            'updated_at': datetime.utcnow().isoformat()
+        })
+        
+        track_user_action('remove_team_member', {
+            'team_id': team_id,
+            'member_id': member_id
+        })
+        
         return jsonify({
-            'success': False,
-            'error': 'Failed to update role'
-        }), 500
+            'success': True,
+            'message': 'Member removed successfully'
+        })
+        
+    except Exception as e:
+        print(f"Error removing team member: {str(e)}")
+        return jsonify({'error': 'Failed to remove team member'}), 500
+
+# ===== ERROR HANDLERS =====
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({'error': 'Endpoint not found'}), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    return jsonify({'error': 'Internal server error'}), 500
+
+@app.errorhandler(403)
+def forbidden(error):
+    return jsonify({'error': 'Access forbidden'}), 403
+
+@app.errorhandler(401)
+def unauthorized(error):
+    return jsonify({'error': 'Unauthorized access'}), 401
+
+# ===== MAIN APPLICATION ENTRY POINT =====
+if __name__ == '__main__':
+    debug_mode = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
+    port = int(os.getenv('PORT', 5000))
+    host = os.getenv('HOST', '0.0.0.0')
+    
+    print(f"Starting Upstand server on {host}:{port}")
+    print(f"Debug mode: {debug_mode}")
+    print(f"Allowed origins: {allowed_origins}")
+    print(f"Firebase status: {'Connected' if db else 'Not connected'}")
+    print(f"OpenAI status: {'Configured' if os.getenv('OPENAI_API_KEY') else 'Not configured'}")
+    print(f"WebSocket support: Enabled")
+    print(f"Analytics: Enabled")
+    
+    socketio.run(app, 
+                debug=debug_mode, 
+                port=port, 
+                host=host, 
+                allow_unsafe_werkzeug=True)
