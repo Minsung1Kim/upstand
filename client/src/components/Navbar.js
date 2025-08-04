@@ -90,6 +90,13 @@ function Navbar() {
                     onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}>
                 Teams
               </Link>
+              <Link to="/analytics" 
+                    className="px-3 py-2 rounded-md hover:bg-opacity-20 transition-all duration-200 font-medium"
+                    style={{color: colors.primary[100]}}
+                    onMouseEnter={(e) => e.target.style.backgroundColor = colors.primary[200] + '20'}
+                    onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}>
+                Analytics
+              </Link>
             </div>
           </div>
           

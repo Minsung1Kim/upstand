@@ -2189,6 +2189,94 @@ def join_team(team_id):
     except Exception as e:
         print(f"Error joining team: {str(e)}")
         return jsonify({'error': 'Failed to join team'}), 500
+    
+
+# ===== ANALYTICS ROUTES =====
+@app.route('/api/analytics/dashboard', methods=['GET'])
+@require_auth
+def get_analytics_dashboard():
+    """Get comprehensive analytics dashboard"""
+    try:
+        company_id = request.company_id
+        team_id = request.args.get('team_id')
+        
+        if not team_id:
+            return jsonify({'error': 'team_id is required'}), 400
+        
+        # Get last 30 days of user activity
+        end_date = datetime.utcnow()
+        start_date = end_date - timedelta(days=30)
+        
+        # User activity metrics
+        activity_ref = db.collection('user_analytics')
+        activity_query = activity_ref.where('team_id', '==', team_id)\
+                                   .where('company_id', '==', company_id)\
+                                   .where('timestamp', '>=', start_date.isoformat())
+        
+        activities = list(activity_query.stream())
+        
+        # Count activities by type
+        activity_counts = {}
+        for activity in activities:
+            action = activity.to_dict().get('action', 'unknown')
+            activity_counts[action] = activity_counts.get(action, 0) + 1
+        
+        # Sprint velocity data
+        sprints_ref = db.collection('sprints')
+        completed_sprints = sprints_ref.where('team_id', '==', team_id)\
+                                     .where('company_id', '==', company_id)\
+                                     .where('status', '==', 'completed')\
+                                     .order_by('completed_at', direction=firestore.Query.DESCENDING)\
+                                     .limit(10)
+        
+        velocity_data = []
+        for sprint in completed_sprints.stream():
+            sprint_info = sprint.to_dict()
+            analytics = sprint_info.get('final_analytics', {})
+            velocity_data.append({
+                'name': sprint_info.get('name', 'Sprint'),
+                'velocity': analytics.get('velocity', 0),
+                'completion_rate': analytics.get('completion_percentage', 0),
+                'completed_at': sprint_info.get('completed_at', '')
+            })
+        
+        # Blocker analysis from recent standups
+        standups_ref = db.collection('standups')
+        recent_standups = standups_ref.where('team_id', '==', team_id)\
+                                    .where('company_id', '==', company_id)\
+                                    .where('date', '>=', start_date.strftime('%Y-%m-%d'))
+        
+        blocker_stats = {'total_standups': 0, 'with_blockers': 0, 'high_severity': 0}
+        for standup in recent_standups.stream():
+            standup_data = standup.to_dict()
+            blocker_stats['total_standups'] += 1
+            
+            blocker_analysis = standup_data.get('blocker_analysis', {})
+            if blocker_analysis.get('has_blockers'):
+                blocker_stats['with_blockers'] += 1
+                if blocker_analysis.get('severity') == 'high':
+                    blocker_stats['high_severity'] += 1
+        
+        return jsonify({
+            'success': True,
+            'analytics': {
+                'user_activity': {
+                    'total_actions': len(activities),
+                    'by_type': activity_counts
+                },
+                'sprint_velocity': velocity_data,
+                'blocker_stats': blocker_stats,
+                'date_range': {
+                    'start': start_date.strftime('%Y-%m-%d'),
+                    'end': end_date.strftime('%Y-%m-%d')
+                }
+            }
+        })
+        
+    except Exception as e:
+        print(f"Error fetching analytics dashboard: {str(e)}")
+        return jsonify({'success': False, 'error': 'Failed to fetch analytics'}), 500
+
 # ===== ERROR HANDLERS =====
 @app.errorhandler(404)
 def not_found(error):

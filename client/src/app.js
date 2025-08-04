@@ -8,6 +8,7 @@ import webSocketService from './services/websocket';
 
 
 
+
 // Import your components
 import Login from './pages/Login';
 import Register from './pages/Register';
@@ -18,6 +19,7 @@ import SprintPlanning from './pages/SprintPlanning';
 import Retrospective from './pages/Retrospective';
 import PrivateRoute from './components/PrivateRoute';
 import SprintManagement from './pages/SprintManagement';
+import Analytics from './pages/Analytics';
 
 // WebSocket Connection Component
 function WebSocketManager() {
@@ -93,6 +95,7 @@ function AppContent() {
           <Route path="/sprint-planning" element={<SprintPlanning />} />
           <Route path="/sprint-management" element={<SprintManagement />} />
           <Route path="/retrospectives" element={<Retrospective />} />
+          <Route path="/analytics" element={<Analytics />} />
         </Route>
         
         {/* Catch all route */}
