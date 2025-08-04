@@ -39,7 +39,7 @@ function Retrospective() {
     setLoading(true);
     
     try {
-      const response = await api.post('/retrospective', {
+      const response = await api.post('/retrospectives', {
         team_id: currentTeam.id,
         sprint_id: sprintId,
         feedback: feedback,
