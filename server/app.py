@@ -1142,66 +1142,59 @@ def get_sprints():
 @require_auth
 def create_sprint():
     try:
-        data = request.json or request.get_json()
+        # Check database connection first
+        global db
+        if not db:
+            print("❌ Database connection not available, reinitializing...")
+            firestore_initialized = init_firestore()
+            if not firestore_initialized:
+                return jsonify({'success': False, 'error': 'Database connection failed'}), 503
+            
+        data = request.json
         company_id = request.company_id
-        
-        print(f"🚀 Sprint creation attempt by user: {request.user_id}")
-        print(f"📝 Raw request data: {data}")
-        print(f"🏢 Company ID: {company_id}")
-        
-        if not data:
-            print("❌ No JSON data received")
-            return jsonify({'error': 'No data provided'}), 400
-        
-        track_user_action('create_sprint', {'team_id': data.get('team_id')})
-        
-        # Extract and validate data
         team_id = data.get('team_id')
-        name = data.get('name', '').strip()
-        start_date = data.get('start_date')
-        end_date = data.get('end_date')
         
-        print(f"📊 Extracted fields:")
-        print(f"   team_id: {team_id}")
-        print(f"   name: '{name}'")
-        print(f"   start_date: {start_date}")
-        print(f"   end_date: {end_date}")
+        print(f"🚀 Creating sprint for team_id: {team_id}, company_id: {company_id}")
+        print(f"📝 Received data: {data}")
         
-        # Validate required fields with detailed error messages
-        if not team_id:
-            return jsonify({'error': 'team_id is required'}), 400
-        if not name:
-            return jsonify({'error': 'Sprint name is required'}), 400
-        if not start_date:
-            return jsonify({'error': 'Start date is required'}), 400
-        if not end_date:
-            return jsonify({'error': 'End date is required'}), 400
+        # Validate required fields (frontend sends startDate/endDate)
+        if not all([team_id, data.get('name'), data.get('startDate'), data.get('endDate')]):
+            print("❌ Missing required fields")
+            return jsonify({'success': False, 'error': 'Missing required fields: team_id, name, startDate, endDate'}), 400
         
         sprint_data = {
             'team_id': team_id,
             'company_id': company_id,
-            'name': name,
-            'goal': data.get('goal', ''),
-            'start_date': str(start_date),  # Convert to string
-            'end_date': str(end_date),      # Convert to string
-            'status': 'active',
+            'name': data.get('name'),
+            'start_date': data.get('startDate'),  # Frontend sends startDate
+            'end_date': data.get('endDate'),      # Frontend sends endDate
+            'goals': data.get('goals', []),
+            'description': data.get('description', ''),
             'created_by': request.user_id,
-            'created_at': datetime.utcnow().isoformat()
+            'created_at': datetime.utcnow().isoformat(),
+            'status': 'active'
         }
         
-        print(f"✅ Final sprint data: {sprint_data}")
+        print(f"💾 Sprint data to save: {sprint_data}")
         
-        doc_ref = db.collection('sprints').add(sprint_data)
-        sprint_data['id'] = doc_ref[1].id
-        
-        print(f"🎉 Sprint created successfully with ID: {sprint_data['id']}")
-        return jsonify({'success': True, 'sprint': sprint_data})
-        
+        # Save to Firestore
+        try:
+            print("📤 Adding sprint to Firestore...")
+            doc_ref = db.collection('sprints').add(sprint_data)
+            sprint_id = doc_ref[1].id
+            sprint_data['id'] = sprint_id
+            print(f"✅ Sprint created successfully with id: {sprint_id}")
+            
+            return jsonify({'success': True, 'sprint': sprint_data})
+            
+        except Exception as firestore_error:
+            print(f"💥 Firestore error: {str(firestore_error)}")
+            return jsonify({'success': False, 'error': 'Database write failed'}), 500
+            
     except Exception as e:
-        error_msg = f"Error creating sprint: {str(e)}"
-        print(f"💥 {error_msg}")
+        print(f"💥 Sprint creation error: {str(e)}")
         traceback.print_exc()
-        return jsonify({'success': False, 'error': error_msg}), 500
+        return jsonify({'success': False, 'error': 'Failed to create sprint'}), 500
 
 @app.route('/api/sprints/<sprint_id>/complete', methods=['POST'])
 @require_auth
@@ -1374,6 +1367,51 @@ def update_task(task_id):
     except Exception as e:
         print(f"Error updating task: {str(e)}")
         return jsonify({'success': False, 'error': 'Failed to update task'}), 500
+
+@app.route('/api/teams/<team_id>/role', methods=['PUT'])
+@require_auth
+def update_team_member_role(team_id):
+    """Update a team member's role"""
+    try:
+        user_id = request.user_id
+        data = request.get_json()
+        target_member_id = data.get('member_id')
+        new_role = data.get('role')
+        
+        if not target_member_id or not new_role:
+            return jsonify({'error': 'member_id and role are required'}), 400
+        
+        if new_role not in ['OWNER', 'MANAGER', 'DEVELOPER']:
+            return jsonify({'error': 'Invalid role'}), 400
+        
+        # Get team document
+        team_ref = db.collection('teams').document(team_id)
+        team_doc = team_ref.get()
+        
+        if not team_doc.exists:
+            return jsonify({'error': 'Team not found'}), 404
+        
+        team_data = team_doc.to_dict()
+        
+        # Check if user has permission (owner or manager)
+        user_role = team_data.get('member_roles', {}).get(user_id, 'DEVELOPER')
+        if user_role not in ['OWNER', 'MANAGER']:
+            return jsonify({'error': 'Permission denied'}), 403
+        
+        # Update member role
+        team_ref.update({
+            f'member_roles.{target_member_id}': new_role,
+            'updated_at': datetime.utcnow().isoformat()
+        })
+        
+        return jsonify({
+            'success': True,
+            'message': 'Role updated successfully'
+        })
+        
+    except Exception as e:
+        print(f"Error updating member role: {str(e)}")
+        return jsonify({'error': 'Failed to update role'}), 500
 
 @app.route('/api/tasks/<task_id>', methods=['DELETE'])
 @require_auth
