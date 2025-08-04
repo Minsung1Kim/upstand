@@ -20,6 +20,9 @@ import Retrospective from './pages/Retrospective';
 import PrivateRoute from './components/PrivateRoute';
 import SprintManagement from './pages/SprintManagement';
 import Analytics from './pages/Analytics';
+import CompanySelector from './components/CompanySelector';
+import JoinCompany from './components/JoinCompany';
+import CreateCompany from './components/CreateCompany';
 
 // WebSocket Connection Component
 function WebSocketManager() {
@@ -96,6 +99,9 @@ function AppContent() {
           <Route path="/sprint-management" element={<SprintManagement />} />
           <Route path="/retrospectives" element={<Retrospective />} />
           <Route path="/analytics" element={<Analytics />} />
+          <Route path="/company/select" element={<CompanySelector />} />
+          <Route path="/company/join" element={<JoinCompany />} />
+          <Route path="/company/create" element={<CreateCompany />} />
         </Route>
         
         {/* Catch all route */}
