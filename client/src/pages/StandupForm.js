@@ -151,11 +151,13 @@ function StandupForm() {
               <h2 className="text-lg font-semibold text-gray-900 mb-4">🚨 Detected Blockers</h2>
               <div className="space-y-2">
                 {response.blocker_analysis.blockers.map((blocker, index) => (
-                  <div key={index} className="flex items-start space-x-2">
-                    <ExclamationCircleIcon className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
-                    <p className="text-sm text-gray-700">{blocker}</p>
-                  </div>
-                ))}
+                <div key={index} className="flex items-start space-x-2">
+                  <ExclamationCircleIcon className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+                  <p className="text-sm text-gray-700">
+                    {typeof blocker === 'string' ? blocker : blocker.keyword || blocker.context || 'Blocker detected'}
+                  </p>
+                </div>
+              ))}
               </div>
               <p className="mt-3 text-sm text-gray-600">
                 Severity: <span className={`font-medium ${

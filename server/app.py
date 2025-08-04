@@ -299,6 +299,14 @@ def generate_team_summary(standups, team_info=None):
         if not standups or not os.getenv('OPENAI_API_KEY'):
             return "Team summary unavailable"
         
+        # Import OpenAI with new API format
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        except ImportError:
+            print("OpenAI package not installed or wrong version. Install with: pip install openai>=1.0.0")
+            return f"Team completed {len(standups)} standups today. Check individual updates for details."
+        
         # Prepare standup data for AI analysis
         standup_texts = []
         for standup in standups:
@@ -323,7 +331,8 @@ def generate_team_summary(standups, team_info=None):
         Provide a professional, actionable summary suitable for managers:
         """
         
-        response = openai.ChatCompletion.create(
+        # Updated OpenAI API call format (v1.0+)
+        response = client.chat.completions.create(  # ✅ NEW FORMAT
             model="gpt-3.5-turbo",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=150,
@@ -335,7 +344,7 @@ def generate_team_summary(standups, team_info=None):
     except Exception as e:
         print(f"Error generating team summary: {e}")
         return f"Team completed {len(standups)} standups today. Check individual updates for details."
-
+    
 @socketio.on('connect')
 def handle_connect(auth):
     print(f'Client connected: {request.sid}')
