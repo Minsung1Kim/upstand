@@ -1234,13 +1234,14 @@ def create_sprint():
 def complete_sprint(sprint_id):
     """Mark sprint as completed and calculate final analytics"""
     try:
-        # Check database connection
+        # Check database connection (KEEPING YOUR FEATURE)
         if not db:
             print("Database connection not available")
             return jsonify({'success': False, 'error': 'Database connection not available'}), 503
             
         print(f"Completing sprint: {sprint_id}")
         
+        # Track user action (KEEPING YOUR FEATURE)
         track_user_action('complete_sprint', {'sprint_id': sprint_id})
         
         sprint_ref = db.collection('sprints').document(sprint_id)
@@ -1296,6 +1297,18 @@ def complete_sprint(sprint_id):
         
         sprint_ref.update(update_data)
         print(f"Sprint {sprint_id} marked as completed")
+        
+        # ADD ONLY THIS (WebSocket notification for real-time update)
+        try:
+            socketio.emit('sprint_completed', {
+                'sprint_id': sprint_id,
+                'sprint_name': sprint_data.get('name', 'Sprint'),
+                'final_analytics': update_data['final_analytics']
+            }, room=f"team_{sprint_data.get('company_id')}_{sprint_data.get('team_id')}")
+            print(f"✅ Sent real-time sprint completion notification")
+        except Exception as socket_error:
+            print(f"Socket emit error: {socket_error}")
+            # Don't fail the request if socket fails
         
         return jsonify({
             'success': True, 
@@ -2203,11 +2216,11 @@ def get_analytics_dashboard():
         if not team_id:
             return jsonify({'error': 'team_id is required'}), 400
         
-        # Get last 30 days of user activity
+        # Get last 30 days of data
         end_date = datetime.utcnow()
         start_date = end_date - timedelta(days=30)
         
-        # User activity metrics
+        # EXISTING FEATURE: User activity metrics
         activity_ref = db.collection('user_analytics')
         activity_query = activity_ref.where('team_id', '==', team_id)\
                                    .where('company_id', '==', company_id)\
@@ -2215,13 +2228,13 @@ def get_analytics_dashboard():
         
         activities = list(activity_query.stream())
         
-        # Count activities by type
+        # Count activities by type (EXISTING)
         activity_counts = {}
         for activity in activities:
             action = activity.to_dict().get('action', 'unknown')
             activity_counts[action] = activity_counts.get(action, 0) + 1
         
-        # Sprint velocity data
+        # EXISTING FEATURE: Sprint velocity data
         sprints_ref = db.collection('sprints')
         completed_sprints = sprints_ref.where('team_id', '==', team_id)\
                                      .where('company_id', '==', company_id)\
@@ -2240,14 +2253,16 @@ def get_analytics_dashboard():
                 'completed_at': sprint_info.get('completed_at', '')
             })
         
-        # Blocker analysis from recent standups
+        # EXISTING FEATURE: Blocker analysis from recent standups
         standups_ref = db.collection('standups')
-        recent_standups = standups_ref.where('team_id', '==', team_id)\
-                                    .where('company_id', '==', company_id)\
-                                    .where('date', '>=', start_date.strftime('%Y-%m-%d'))
+        recent_standups_query = standups_ref.where('team_id', '==', team_id)\
+                                           .where('company_id', '==', company_id)\
+                                           .where('date', '>=', start_date.strftime('%Y-%m-%d'))
         
         blocker_stats = {'total_standups': 0, 'with_blockers': 0, 'high_severity': 0}
-        for standup in recent_standups.stream():
+        recent_standups_list = list(recent_standups_query.stream())
+        
+        for standup in recent_standups_list:
             standup_data = standup.to_dict()
             blocker_stats['total_standups'] += 1
             
@@ -2257,15 +2272,147 @@ def get_analytics_dashboard():
                 if blocker_analysis.get('severity') == 'high':
                     blocker_stats['high_severity'] += 1
         
+        # NEW FEATURE: Team Participation Analytics
+        team_ref = db.collection('teams').document(team_id)
+        team_doc = team_ref.get()
+        team_members = team_doc.to_dict().get('members', []) if team_doc.exists else []
+        total_members = len(team_members)
+
+        # Active participation (standups + task completion)
+        active_members = set()
+        standup_members = set()
+
+        # Check standup participation
+        for standup in recent_standups_list:
+            standup_data = standup.to_dict()
+            user_id = standup_data.get('user_id')
+            if user_id:
+                active_members.add(user_id)
+                standup_members.add(user_id)
+
+        # Check task completion
+        tasks_ref = db.collection('tasks')
+        completed_tasks_query = tasks_ref.where('company_id', '==', company_id)\
+                                        .where('status', '==', 'done')\
+                                        .where('updated_at', '>=', start_date.isoformat())
+
+        for task in completed_tasks_query.stream():
+            task_data = task.to_dict()
+            created_by = task_data.get('created_by')
+            if created_by in team_members:
+                active_members.add(created_by)
+
+        participation_rate = (len(active_members) / total_members * 100) if total_members > 0 else 0
+        standup_consistency = (len(standup_members) / total_members * 100) if total_members > 0 else 0
+
+        # NEW FEATURE: Sentiment Trend (daily)
+        daily_sentiment = defaultdict(lambda: {'positive': 0, 'neutral': 0, 'negative': 0, 'total': 0})
+
+        for standup in recent_standups_list:
+            standup_data = standup.to_dict()
+            date = standup_data.get('date')
+            sentiment = standup_data.get('sentiment_analysis', {}).get('sentiment', 'neutral')
+            
+            if date and sentiment in daily_sentiment[date]:
+                daily_sentiment[date][sentiment] += 1
+                daily_sentiment[date]['total'] += 1
+
+        sentiment_trend = []
+        for date in sorted(daily_sentiment.keys())[-7:]:  # Last 7 days
+            data = daily_sentiment[date]
+            if data['total'] > 0:
+                sentiment_trend.append({
+                    'date': date,
+                    'positive_pct': round(data['positive'] / data['total'] * 100, 1),
+                    'neutral_pct': round(data['neutral'] / data['total'] * 100, 1),
+                    'negative_pct': round(data['negative'] / data['total'] * 100, 1)
+                })
+
+        # NEW FEATURE: Lead Time for Tasks
+        lead_times = []
+        tasks_with_dates = tasks_ref.where('company_id', '==', company_id)\
+                                   .where('status', '==', 'done')\
+                                   .where('updated_at', '>=', start_date.isoformat())
+
+        for task in tasks_with_dates.stream():
+            task_data = task.to_dict()
+            created_at = task_data.get('created_at')
+            updated_at = task_data.get('updated_at')
+            
+            if created_at and updated_at:
+                try:
+                    created = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                    completed = datetime.fromisoformat(updated_at.replace('Z', '+00:00'))
+                    lead_time_days = (completed - created).days
+                    if lead_time_days >= 0:
+                        lead_times.append(lead_time_days)
+                except:
+                    continue
+
+        avg_lead_time = sum(lead_times) / len(lead_times) if lead_times else 0
+
+        # NEW FEATURE: Blocker Resolution Time (simplified)
+        blocker_resolution_times = []
+        user_blocker_history = defaultdict(list)
+        
+        # Group standups by user and date
+        for standup in recent_standups_list:
+            standup_data = standup.to_dict()
+            user_id = standup_data.get('user_id')
+            date = standup_data.get('date')
+            has_blockers = standup_data.get('blocker_analysis', {}).get('has_blockers', False)
+            
+            if user_id and date:
+                user_blocker_history[user_id].append({
+                    'date': date,
+                    'has_blockers': has_blockers
+                })
+        
+        # Calculate resolution times
+        for user_id, history in user_blocker_history.items():
+            history.sort(key=lambda x: x['date'])
+            blocker_start = None
+            
+            for entry in history:
+                if entry['has_blockers'] and blocker_start is None:
+                    blocker_start = entry['date']
+                elif not entry['has_blockers'] and blocker_start is not None:
+                    try:
+                        start_date_obj = datetime.strptime(blocker_start, '%Y-%m-%d')
+                        end_date_obj = datetime.strptime(entry['date'], '%Y-%m-%d')
+                        resolution_days = (end_date_obj - start_date_obj).days
+                        if resolution_days > 0:
+                            blocker_resolution_times.append(resolution_days)
+                    except:
+                        pass
+                    blocker_start = None
+        
+        avg_blocker_resolution = sum(blocker_resolution_times) / len(blocker_resolution_times) if blocker_resolution_times else 0
+
         return jsonify({
             'success': True,
             'analytics': {
+                # EXISTING FEATURES (kept all)
                 'user_activity': {
                     'total_actions': len(activities),
                     'by_type': activity_counts
                 },
                 'sprint_velocity': velocity_data,
                 'blocker_stats': blocker_stats,
+                # NEW FEATURES (added)
+                'team_participation': {
+                    'participation_rate': round(participation_rate, 1),
+                    'standup_consistency': round(standup_consistency, 1),
+                    'active_members': len(active_members),
+                    'total_members': total_members
+                },
+                'sentiment_trend': sentiment_trend,
+                'performance_metrics': {
+                    'avg_lead_time_days': round(avg_lead_time, 1),
+                    'tasks_completed': len(lead_times),
+                    'avg_blocker_resolution_days': round(avg_blocker_resolution, 1),
+                    'blockers_resolved': len(blocker_resolution_times)
+                },
                 'date_range': {
                     'start': start_date.strftime('%Y-%m-%d'),
                     'end': end_date.strftime('%Y-%m-%d')
