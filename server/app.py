@@ -562,6 +562,143 @@ def create_team():
             'error': 'Failed to create team'
         }), 500
 
+@app.route('/api/companies', methods=['POST'])
+@require_auth
+def create_company():
+    """Create a new company"""
+    try:
+        data = request.get_json()
+        user_id = request.user_id
+        user_email = request.user_email
+        
+        company_name = data.get('name', '').strip()
+        company_domain = data.get('domain', '').strip()
+        
+        if not company_name:
+            return jsonify({'error': 'Company name is required'}), 400
+        
+        # Generate invite code
+        import secrets
+        invite_code = secrets.token_urlsafe(8)
+        
+        company_data = {
+            'name': company_name,
+            'domain': company_domain,
+            'invite_code': invite_code,
+            'owner_id': user_id,
+            'members': [user_id],
+            'member_roles': {user_id: 'OWNER'},
+            'member_joined': {user_id: datetime.utcnow().isoformat()},
+            'created_at': datetime.utcnow().isoformat(),
+            'updated_at': datetime.utcnow().isoformat()
+        }
+        
+        # Create company
+        company_ref = db.collection('companies').add(company_data)
+        company_id = company_ref[1].id
+        
+        # Create user-company relationship  
+        user_company_data = {
+            'user_id': user_id,
+            'company_id': company_id,
+            'role': 'OWNER', 
+            'joined_at': datetime.utcnow().isoformat(),
+            'status': 'active'
+        }
+        
+        db.collection('user_companies').add(user_company_data)
+        
+        track_user_action('create_company', {'company_id': company_id})
+        
+        return jsonify({
+            'success': True,
+            'company': {
+                'id': company_id,
+                'name': company_name,
+                'role': 'OWNER',
+                'invite_code': invite_code
+            }
+        })
+        
+    except Exception as e:
+        print(f"Error creating company: {str(e)}")
+        return jsonify({'success': False, 'error': 'Failed to create company'}), 500
+
+
+@app.route('/api/companies/join', methods=['POST'])
+@require_auth
+def join_company():
+    """Join a company by invite code or email"""
+    try:
+        data = request.get_json()
+        user_id = request.user_id
+        user_email = request.user_email
+        
+        company_code = data.get('company_code', '').strip()
+        company_email = data.get('company_email', '').strip()
+        
+        if not company_code and not company_email:
+            return jsonify({'error': 'Company code or email is required'}), 400
+        
+        # Find company by code or email domain
+        companies_ref = db.collection('companies')
+        
+        if company_code:
+            # Find by invite code
+            company_query = companies_ref.where('invite_code', '==', company_code).limit(1)
+        else:
+            # Find by email domain
+            domain = company_email.split('@')[1] if '@' in company_email else ''
+            company_query = companies_ref.where('domain', '==', domain).limit(1)
+        
+        companies = list(company_query.stream())
+        
+        if not companies:
+            return jsonify({'error': 'Company not found'}), 404
+        
+        company_doc = companies[0]
+        company_data = company_doc.to_dict()
+        company_id = company_doc.id
+        
+        # Check if user is already a member
+        members = company_data.get('members', [])
+        if user_id in members:
+            return jsonify({'error': 'You are already a member of this company'}), 400
+        
+        # Add user to company
+        company_doc.reference.update({
+            'members': firestore.ArrayUnion([user_id]),
+            f'member_roles.{user_id}': 'MEMBER',
+            f'member_joined.{user_id}': datetime.utcnow().isoformat(),
+            'updated_at': datetime.utcnow().isoformat()
+        })
+        
+        # Create user-company relationship
+        user_company_data = {
+            'user_id': user_id,
+            'company_id': company_id,
+            'role': 'MEMBER',
+            'joined_at': datetime.utcnow().isoformat(),
+            'status': 'active'
+        }
+        
+        db.collection('user_companies').add(user_company_data)
+        
+        track_user_action('join_company', {'company_id': company_id})
+        
+        return jsonify({
+            'success': True,
+            'message': 'Successfully joined company',
+            'company': {
+                'id': company_id,
+                'name': company_data.get('name'),
+                'role': 'MEMBER'
+            }
+        })
+        
+    except Exception as e:
+        print(f"Error joining company: {str(e)}")
+        return jsonify({'success': False, 'error': 'Failed to join company'}), 500
 @app.route('/api/teams/<team_id>', methods=['GET'])
 @require_auth
 def get_team(team_id):

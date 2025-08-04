@@ -268,12 +268,16 @@ function TeamSettings() {
     setShowDropdown(null);
   };
 
-  const handleChangeRole = async (newRole) => {
-    try {
-      // Make API call to update role in database
-      const response = await api.put(`/teams/${showRoleModal.teamId}/role`, {
+const handleChangeRole = async (newRole) => {
+  try {
+    // Make API call to update role in database
+    const response = await api.put(
+      `/teams/${showRoleModal.teamId}/role`,
+      {
+        member_id: currentUser?.uid, // <-- Add this line
         role: newRole
-      });
+      }
+    );
       
       if (response.data.success) {
         // Update localStorage
