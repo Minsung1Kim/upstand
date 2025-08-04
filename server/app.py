@@ -95,9 +95,9 @@ def init_firestore():
                 db = firestore.Client(credentials=credentials_obj)
                 print("✅ Firestore initialized successfully with service account JSON")
         else:
-            # Try application default credentials (for Railway/production)
-            db = firestore.Client()
-            print("✅ Firestore initialized with default credentials")
+            print("No Firebase service account key found in environment")
+            db = None
+            return False
             
         # Test the connection
         test_collection = db.collection('test')
@@ -2059,8 +2059,8 @@ def unauthorized(error):
 # ===== MAIN APPLICATION ENTRY POINT =====
 if __name__ == '__main__':
     debug_mode = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
-    port = int(os.getenv('PORT', 5000))
-    host = os.getenv('HOST', '0.0.0.0')
+    port = int(os.getenv('PORT', '5000'))
+    host = '0.0.0.0'  
     
     print(f"Starting Upstand server on {host}:{port}")
     print(f"Debug mode: {debug_mode}")
