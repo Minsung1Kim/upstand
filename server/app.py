@@ -37,17 +37,21 @@ else:
     allowed_origins = ['http://localhost:3000']
 
 # Add common deployment URLs
-allowed_origins.extend([
-    'https://upstand-omega.vercel.app',
-    'https://upstand-git-main-minsung1kims-projects.vercel.app',
-    'https://upstand-cytbctct3-minsung1kims-projects.vercel.app'
-])
+# Get allowed origins from environment with fallback to hardcoded values
+allowed_origins_env = os.getenv('ALLOWED_ORIGINS', '')
+if allowed_origins_env:
+    allowed_origins = [origin.strip() for origin in allowed_origins_env.split(',')]
+else:
+    # Hardcoded fallback for production
+    allowed_origins = [
+        'http://localhost:3000',
+        'https://upstand-omega.vercel.app',
+        'https://upstand-git-main-minsung1kims-projects.vercel.app',
+        'https://upstand-cytbctct3-minsung1kims-projects.vercel.app'
+    ]
 
-# Remove duplicates
-allowed_origins = list(set(allowed_origins))
-
-print(f" ALLOWED_ORIGINS: {allowed_origins}")
-
+print(f"ALLOWED_ORIGINS env var: {os.getenv('ALLOWED_ORIGINS')}")
+print(f"Final allowed_origins: {allowed_origins}")
 
 CORS(app, 
      origins=allowed_origins,
@@ -95,7 +99,7 @@ def init_firestore():
                 db = firestore.Client(credentials=credentials_obj)
                 print("✅ Firestore initialized successfully with service account JSON")
         else:
-            print("No Firebase service account key found in environment")
+            print("❌ No Firebase service account key found in environment")
             db = None
             return False
             
@@ -332,10 +336,10 @@ def generate_team_summary(standups, team_info=None):
         return f"Team completed {len(standups)} standups today. Check individual updates for details."
 
 @socketio.on('connect')
-def handle_connect():
-    print(f"✅ Client connected: {request.sid}")
-    emit('connected', {'message': 'Successfully connected to Upstand backend', 'sid': request.sid})
-
+def handle_connect(auth):
+    print(f'Client connected: {request.sid}')
+    emit('connection_response', {'status': 'Connected to Upstand server'})
+    
 @socketio.on('disconnect')
 def handle_disconnect():
     print(f'Client disconnected: {request.sid}')
