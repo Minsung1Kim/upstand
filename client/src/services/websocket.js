@@ -16,14 +16,24 @@ class WebSocketService {
     
     try {
       this.socket = io(wsUrl, {
-        transports: ['websocket', 'polling'], // Try both transports
+        // Try polling first, then upgrade to websocket if possible
+        transports: ['polling', 'websocket'],
         upgrade: true,
         timeout: 20000,
         forceNew: true,
         reconnection: true,
         reconnectionDelay: 1000,
         reconnectionAttempts: 5,
-        maxReconnectionAttempts: 5
+        maxReconnectionAttempts: 5,
+        // Additional Railway-specific options
+        withCredentials: false,
+        autoConnect: true,
+        // Ensure proper protocol handling
+        secure: wsUrl.startsWith('https://'),
+        // Handle CORS properly
+        extraHeaders: {
+          'Access-Control-Allow-Origin': '*'
+        }
       });
 
       this.setupEventHandlers();
@@ -38,8 +48,12 @@ class WebSocketService {
 
     this.socket.on('connect', () => {
       console.log('✅ WebSocket connected successfully');
+      console.log('🆔 Socket ID:', this.socket.id);
       this.isConnected = true;
       this.reconnectAttempts = 0;
+      
+      // Test the connection
+      this.socket.emit('ping');
     });
 
     this.socket.on('disconnect', (reason) => {
@@ -48,22 +62,39 @@ class WebSocketService {
       
       if (reason === 'io server disconnect') {
         // Server disconnected, manual reconnection needed
-        this.socket.connect();
+        console.log('🔄 Server disconnected, attempting manual reconnection...');
+        setTimeout(() => {
+          this.socket.connect();
+        }, 1000);
       }
     });
 
     this.socket.on('connect_error', (error) => {
       console.error('❌ WebSocket connection error:', error);
+      console.log('🔄 Error details:', {
+        message: error.message,
+        description: error.description,
+        context: error.context,
+        type: error.type
+      });
+      
       this.isConnected = false;
       this.reconnectAttempts++;
       
       if (this.reconnectAttempts >= this.maxReconnectAttempts) {
         console.error('❌ Max reconnection attempts reached');
+        console.log('💡 Switching to polling mode...');
+        
+        // Try with polling only as fallback
+        this.socket.io.opts.transports = ['polling'];
+        setTimeout(() => {
+          this.socket.connect();
+        }, 2000);
       }
     });
 
-    this.socket.on('connection_response', (data) => {
-      console.log('🎉 Server connection response:', data);
+    this.socket.on('connected', (data) => {
+      console.log('🎉 Server connection confirmed:', data);
     });
 
     this.socket.on('pong', (data) => {
@@ -73,7 +104,6 @@ class WebSocketService {
     // Real-time event handlers
     this.socket.on('standup_update', (data) => {
       console.log('📊 Standup update received:', data);
-      // Emit custom event for components to listen
       window.dispatchEvent(new CustomEvent('standupUpdate', { detail: data }));
     });
 
@@ -86,51 +116,47 @@ class WebSocketService {
       console.log('🔔 Notification received:', data);
       window.dispatchEvent(new CustomEvent('notification', { detail: data }));
     });
+
+    this.socket.on('team_joined', (data) => {
+      console.log('✅ Successfully joined team room:', data);
+    });
   }
 
-  joinTeam(teamId, companyId = 'default') {
+  joinTeam(teamId, companyId) {
     if (this.socket && this.isConnected) {
-      console.log(`🏠 Joining team: ${teamId} in company: ${companyId}`);
+      console.log(`👥 Joining team room: ${teamId} in company: ${companyId}`);
       this.socket.emit('join_team', { team_id: teamId, company_id: companyId });
     } else {
-      console.warn('⚠️ Cannot join team - WebSocket not connected');
+      console.warn('⚠️ Socket not connected, cannot join team');
     }
   }
 
-  leaveTeam(teamId, companyId = 'default') {
+  leaveTeam(teamId, companyId) {
     if (this.socket && this.isConnected) {
-      console.log(`🚪 Leaving team: ${teamId} in company: ${companyId}`);
+      console.log(`👋 Leaving team room: ${teamId} in company: ${companyId}`);
       this.socket.emit('leave_team', { team_id: teamId, company_id: companyId });
-    }
-  }
-
-  ping() {
-    if (this.socket && this.isConnected) {
-      console.log('🏓 Sending ping');
-      this.socket.emit('ping');
     }
   }
 
   disconnect() {
     if (this.socket) {
-      console.log('🔌 Disconnecting WebSocket');
+      console.log('🔌 Manually disconnecting WebSocket');
       this.socket.disconnect();
       this.isConnected = false;
     }
   }
 
-  // Check if connected
-  isSocketConnected() {
-    return this.socket && this.isConnected;
+  getConnectionStatus() {
+    return this.isConnected ? 'Connected' : 'Disconnected';
   }
 
-  // Get connection status
-  getConnectionStatus() {
-    return {
-      connected: this.isConnected,
-      reconnectAttempts: this.reconnectAttempts,
-      socketId: this.socket?.id || null
-    };
+  // Utility method to test connection
+  testConnection() {
+    if (this.socket && this.isConnected) {
+      this.socket.emit('ping');
+      return true;
+    }
+    return false;
   }
 }
 

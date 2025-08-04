@@ -30,20 +30,24 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key-12345')
 
 # Get allowed origins from environment with fallback to hardcoded values
-allowed_origins_env = os.getenv('ALLOWED_ORIGINS', '')
-if allowed_origins_env:
-    allowed_origins = [origin.strip() for origin in allowed_origins_env.split(',')]
+env_origins = os.getenv('ALLOWED_ORIGINS', '')
+if env_origins:
+    allowed_origins = [origin.strip() for origin in env_origins.split(',')]
 else:
-    # Hardcoded fallback for production
-    allowed_origins = [
-        'http://localhost:3000',
-        'https://upstand-omega.vercel.app',
-        'https://upstand-git-main-minsung1kims-projects.vercel.app',
-        'https://upstand-cytbctct3-minsung1kims-projects.vercel.app'
-    ]
+    allowed_origins = ['http://localhost:3000']
 
-print(f"ALLOWED_ORIGINS env var: {os.getenv('ALLOWED_ORIGINS')}")
-print(f"Final allowed_origins: {allowed_origins}")
+# Add common deployment URLs
+allowed_origins.extend([
+    'https://upstand-omega.vercel.app',
+    'https://upstand-git-main-minsung1kims-projects.vercel.app',
+    'https://upstand-cytbctct3-minsung1kims-projects.vercel.app'
+])
+
+# Remove duplicates
+allowed_origins = list(set(allowed_origins))
+
+print(f" ALLOWED_ORIGINS: {allowed_origins}")
+
 
 CORS(app, 
      origins=allowed_origins,
@@ -53,15 +57,23 @@ CORS(app,
      expose_headers=['Content-Type', 'Authorization'],
      max_age=3600)
 
-socketio = SocketIO(app, 
+socketio = SocketIO(app,
                    cors_allowed_origins=allowed_origins,
-                   logger=False, 
-                   engineio_logger=False,
+                   logger=True,
+                   engineio_logger=True,
                    ping_timeout=60,
-                   ping_interval=25)
+                   ping_interval=25,
+                   async_mode='threading',
+                   transports=['websocket', 'polling'])
 
 # Initialize global database variable
 db = None
+
+def get_company_id():
+    company_id = request.headers.get('X-Company-ID')
+    if not company_id:
+        return jsonify({'error': 'Company ID required'}), 400
+    return company_id
 
 def init_firestore():
     """Initialize Firestore with proper error handling"""
@@ -179,6 +191,7 @@ def require_auth(f):
                 id_token = id_token[7:]
             decoded_token = auth.verify_id_token(id_token)
             request.user_id = decoded_token['uid']
+            request.user_name = decoded_token.get('name', '')
             request.user_email = decoded_token.get('email', '')
             request.company_id = request.headers.get('X-Company-ID', 'default')
         except Exception as e:
@@ -318,11 +331,10 @@ def generate_team_summary(standups, team_info=None):
         print(f"Error generating team summary: {e}")
         return f"Team completed {len(standups)} standups today. Check individual updates for details."
 
-# ===== WEBSOCKET EVENTS =====
 @socketio.on('connect')
-def handle_connect(auth):
-    print(f'Client connected: {request.sid}')
-    emit('connection_response', {'status': 'Connected to Upstand server'})
+def handle_connect():
+    print(f"✅ Client connected: {request.sid}")
+    emit('connected', {'message': 'Successfully connected to Upstand backend', 'sid': request.sid})
 
 @socketio.on('disconnect')
 def handle_disconnect():
@@ -692,6 +704,7 @@ def submit_standup():
         standup_data = {
             'user_id': user_id,
             'user_email': user_email,
+            'user_name': getattr(request, 'user_name', ''),
             'team_id': team_id,
             'company_id': company_id,
             'date': today,
@@ -699,12 +712,18 @@ def submit_standup():
             'today': today_text,
             'blockers': blockers_text,
             'blocker_analysis': blocker_analysis,
+            'mood': data.get('mood', 5), 
             'sentiment_analysis': sentiment_analysis,
             'created_at': datetime.utcnow().isoformat()
         }
         
         # Save to Firestore
         db.collection('standups').add(standup_data)
+        room = f"team_{company_id}_{team_id}"
+        socketio.emit('standup_update', {
+            'type': 'new_standup',
+            'standup': standup_data
+        }, room=room)
         
         # Get all today's standups for team summary
         today_standups = db.collection('standups').where('team_id', '==', team_id)\
