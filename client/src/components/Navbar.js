@@ -35,6 +35,13 @@ function Navbar() {
     }
   };
 
+  const handleCompanySwitch = (company) => {
+    switchCompany(company);
+    setShowCompanyDropdown(false);
+    // Force a page refresh to update all components with new company context
+    window.location.reload();
+  };
+
   // Get user profile information
   const userProfile = getUserProfile();
   const displayName = userProfile?.firstName ? `${userProfile.firstName} ${userProfile.lastName}`.trim() : 'User';
@@ -147,12 +154,9 @@ function Navbar() {
                       {userCompanies.map((company) => (
                         <button
                           key={company.id}
-                          onClick={() => {
-                            switchCompany(company);
-                            setShowCompanyDropdown(false);
-                          }}
+                          onClick={() => handleCompanySwitch(company)}
                           className="w-full text-left px-4 py-3 text-sm flex items-center justify-between transition-all duration-200"
-                          style={currentCompany.id === company.id ? 
+                          style={currentCompany.id === company.id ?
                             {backgroundColor: colors.primary[200], color: colors.secondary[500]} : 
                             {color: colors.neutral[700]}
                           }
@@ -192,7 +196,7 @@ function Navbar() {
                         <button
                           onClick={() => {
                             setShowCompanyDropdown(false);
-                            navigate('/company/create'); // <-- Change this to your company creation route
+                            navigate('/company/create');
                           }}
                           className="block w-full text-left px-4 py-2 text-sm transition-all duration-200"
                           style={{color: colors.neutral[600]}}
