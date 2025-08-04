@@ -1524,50 +1524,6 @@ def get_sprint_comments(sprint_id):
         return jsonify({'success': False, 'error': 'Failed to fetch comments'}), 500
 
 # ===== RETROSPECTIVE ROUTES =====
-@app.route('/api/retrospectives', methods=['POST'])
-@require_auth
-def create_retrospective():
-    """Create a retrospective session"""
-    try:
-        data = request.get_json()
-        company_id = request.company_id
-        team_id = data.get('team_id')
-        
-        if not team_id:
-            return jsonify({'error': 'team_id is required'}), 400
-        
-        track_user_action('create_retrospective', {'team_id': team_id}, team_id)
-        
-        # Verify team belongs to current company
-        team_ref = db.collection('teams').document(team_id)
-        team_doc = team_ref.get()
-        if not team_doc.exists or team_doc.to_dict().get('company_id') != company_id:
-            return jsonify({'error': 'Team not found or access denied'}), 403
-        
-        retro_data = {
-            'team_id': team_id,
-            'company_id': company_id,
-            'sprint_name': data.get('sprint_name', ''),
-            'what_went_well': data.get('what_went_well', []),
-            'what_could_improve': data.get('what_could_improve', []),
-            'action_items': data.get('action_items', []),
-            'created_by': request.user_id,
-            'created_at': firestore.SERVER_TIMESTAMP
-        }
-        
-        # Save retrospective
-        doc_ref = db.collection('retrospectives').add(retro_data)
-        retro_id = doc_ref[1].id
-        
-        return jsonify({
-            'success': True,
-            'retrospective_id': retro_id,
-            'message': 'Retrospective created successfully'
-        })
-        
-    except Exception as e:
-        print(f"Error creating retrospective: {str(e)}")
-        return jsonify({'success': False, 'error': 'Failed to create retrospective'}), 500
 
 @app.route('/api/retrospectives', methods=['GET'])
 @require_auth
@@ -1602,16 +1558,11 @@ def get_retrospectives():
         print(f"Error fetching retrospectives: {str(e)}")
         return jsonify({'success': False, 'error': 'Failed to fetch retrospectives'}), 500
 
-@app.route('/api/retrospective-feedback', methods=['POST'])
+@app.route('/api/retrospectives', methods=['POST'])
 @require_auth
-def submit_retrospective_feedback():
-    """Submit retrospective feedback with AI analysis"""
+def create_retrospective():
+    """Create a retrospective session"""
     try:
-        # Check database connection
-        if not db:
-            print("Database connection not available")
-            return jsonify({'success': False, 'error': 'Database connection not available'}), 503
-            
         data = request.get_json()
         company_id = request.company_id
         team_id = data.get('team_id')
@@ -1619,7 +1570,7 @@ def submit_retrospective_feedback():
         if not team_id:
             return jsonify({'error': 'team_id is required'}), 400
         
-        track_user_action('submit_retrospective_feedback', {'team_id': team_id}, team_id)
+        track_user_action('create_retrospective', {'team_id': team_id}, team_id)
         
         # Verify team belongs to current company
         team_ref = db.collection('teams').document(team_id)
@@ -1627,54 +1578,31 @@ def submit_retrospective_feedback():
         if not team_doc.exists or team_doc.to_dict().get('company_id') != company_id:
             return jsonify({'error': 'Team not found or access denied'}), 403
         
-        feedback_data = {
+        retro_data = {
             'team_id': team_id,
             'company_id': company_id,
-            'category': data.get('category'),  # went_well, could_improve, action_items
-            'feedback': data.get('feedback'),
-            'anonymous': data.get('anonymous', True),
-            'created_by': request.user_id if not data.get('anonymous') else None,
-            'created_at': firestore.SERVER_TIMESTAMP
+            'sprint_name': data.get('sprint_name', ''),
+            'what_went_well': data.get('what_went_well', []),
+            'what_could_improve': data.get('what_could_improve', []),
+            'action_items': data.get('action_items', []),
+            'created_by': request.user_id,
+            'created_at': datetime.utcnow().isoformat()
         }
         
-        # Basic AI analysis for the feedback
-        feedback_text = feedback_data['feedback']
-        category = feedback_data['category']
-        
-        analysis = {
-            'themes': [{
-                'title': f"{category.replace('_', ' ').title()} Feedback",
-                'sentiment': 'positive' if category == 'went_well' else 'neutral' if category == 'action_items' else 'negative',
-                'items': [feedback_text],
-                'actionable': category == 'action_items' or 'should' in feedback_text.lower()
-            }],
-            'overall_sentiment': f"Team member provided {category.replace('_', ' ')} feedback",
-            'suggested_actions': [f"Review and discuss: {feedback_text[:50]}..."] if len(feedback_text) > 50 else [f"Review: {feedback_text}"]
-        }
-        
-        # Save to Firestore
-        doc_ref = db.collection('retrospective_feedback').add(feedback_data)
-        
-        # Emit real-time update
-        socketio.emit('retrospective_feedback_added', {
-            'feedback_id': doc_ref[1].id,
-            'team_id': team_id,
-            'category': category,
-            'anonymous': feedback_data['anonymous']
-        }, room=f"team_{company_id}_{team_id}")
+        # Save retrospective
+        doc_ref = db.collection('retrospectives').add(retro_data)
+        retro_id = doc_ref[1].id
         
         return jsonify({
             'success': True,
-            'feedback_id': doc_ref[1].id,
-            'analysis': analysis,
-            'message': 'Feedback submitted successfully'
+            'retrospective_id': retro_id,
+            'message': 'Retrospective created successfully'
         })
         
     except Exception as e:
-        print(f"Error submitting retrospective feedback: {str(e)}")
-        traceback.print_exc()
-        return jsonify({'success': False, 'error': 'Failed to submit feedback'}), 500
-
+        print(f"Error creating retrospective: {str(e)}")
+        return jsonify({'success': False, 'error': 'Failed to create retrospective'}), 500
+    
 @app.route('/api/retrospective-feedback', methods=['GET'])
 @require_auth
 def get_retrospective_feedback():
@@ -1699,6 +1627,10 @@ def get_retrospective_feedback():
         for feedback in feedback_docs:
             feedback_data = feedback.to_dict()
             feedback_data['id'] = feedback.id
+            
+            # Convert server timestamp to string if needed
+            if hasattr(feedback_data.get('created_at'), 'isoformat'):
+                feedback_data['created_at'] = feedback_data['created_at'].isoformat()
             
             # Don't expose user info for anonymous feedback
             if feedback_data.get('anonymous', True):
@@ -1728,39 +1660,7 @@ def get_retrospective_feedback():
         print(f"Error fetching retrospective feedback: {str(e)}")
         return jsonify({'success': False, 'error': 'Failed to fetch feedback'}), 500
 
-@app.route('/api/retrospectives/feedback', methods=['POST'])
-@require_auth
-def submit_retrospective_feedback():
-    """Submit retrospective feedback"""
-    try:
-        data = request.get_json()
-        company_id = request.company_id
-        team_id = data.get('team_id')
-        
-        if not team_id:
-            return jsonify({'error': 'team_id is required'}), 400
-        
-        feedback_data = {
-            'team_id': team_id,
-            'company_id': company_id,
-            'category': data.get('category'),
-            'feedback': data.get('feedback'),
-            'anonymous': data.get('anonymous', True),
-            'created_by': request.user_id if not data.get('anonymous') else None,
-            'created_at': datetime.utcnow().isoformat()
-        }
-        
-        doc_ref = db.collection('retrospectives').add(feedback_data)
-        
-        return jsonify({
-            'success': True,
-            'feedback_id': doc_ref[1].id,
-            'message': 'Feedback submitted successfully'
-        })
-        
-    except Exception as e:
-        print(f"Error submitting retrospective feedback: {str(e)}")
-        return jsonify({'success': False, 'error': 'Failed to submit feedback'}), 500
+
 # ===== ANALYTICS ROUTES =====
 @app.route('/api/analytics/team-velocity', methods=['GET'])
 @require_auth
