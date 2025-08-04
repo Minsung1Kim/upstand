@@ -915,11 +915,15 @@ def get_dashboard():
             for standup in recent_standups_query.stream():
                 standup_data = standup.to_dict()
                 recent_standups.append({
-                    'user': standup_data.get('user_email', 'Unknown'),
-                    'date': standup_data.get('date'),
-                    'sentiment': standup_data.get('sentiment_analysis', {}).get('sentiment', 'neutral'),
-                    'has_blockers': standup_data.get('blocker_analysis', {}).get('has_blockers', False)
-                })
+                'user': standup_data.get('user_email', 'Unknown'),
+                'user_name': standup_data.get('user_name', standup_data.get('user_email', 'Unknown')),
+                'date': standup_data.get('date'),
+                'yesterday': standup_data.get('yesterday', ''),
+                'today': standup_data.get('today', ''),
+                'blockers': standup_data.get('blockers', ''),
+                'sentiment': standup_data.get('sentiment_analysis', {}).get('sentiment', 'neutral'),
+                'has_blockers': standup_data.get('blocker_analysis', {}).get('has_blockers', False)
+            })
         except Exception as e:
             print(f"Error fetching recent standups: {e}")
         
@@ -1724,6 +1728,39 @@ def get_retrospective_feedback():
         print(f"Error fetching retrospective feedback: {str(e)}")
         return jsonify({'success': False, 'error': 'Failed to fetch feedback'}), 500
 
+@app.route('/api/retrospectives/feedback', methods=['POST'])
+@require_auth
+def submit_retrospective_feedback():
+    """Submit retrospective feedback"""
+    try:
+        data = request.get_json()
+        company_id = request.company_id
+        team_id = data.get('team_id')
+        
+        if not team_id:
+            return jsonify({'error': 'team_id is required'}), 400
+        
+        feedback_data = {
+            'team_id': team_id,
+            'company_id': company_id,
+            'category': data.get('category'),
+            'feedback': data.get('feedback'),
+            'anonymous': data.get('anonymous', True),
+            'created_by': request.user_id if not data.get('anonymous') else None,
+            'created_at': datetime.utcnow().isoformat()
+        }
+        
+        doc_ref = db.collection('retrospectives').add(feedback_data)
+        
+        return jsonify({
+            'success': True,
+            'feedback_id': doc_ref[1].id,
+            'message': 'Feedback submitted successfully'
+        })
+        
+    except Exception as e:
+        print(f"Error submitting retrospective feedback: {str(e)}")
+        return jsonify({'success': False, 'error': 'Failed to submit feedback'}), 500
 # ===== ANALYTICS ROUTES =====
 @app.route('/api/analytics/team-velocity', methods=['GET'])
 @require_auth
