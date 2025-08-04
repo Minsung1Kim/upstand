@@ -339,7 +339,7 @@ def generate_team_summary(standups, team_info=None):
 def handle_connect(auth):
     print(f'Client connected: {request.sid}')
     emit('connection_response', {'status': 'Connected to Upstand server'})
-    
+
 @socketio.on('disconnect')
 def handle_disconnect():
     print(f'Client disconnected: {request.sid}')
@@ -1145,6 +1145,10 @@ def create_sprint():
         data = request.json
         company_id = request.company_id
         
+        print(f"🚀 Sprint creation attempt by user: {request.user_id}")
+        print(f"📝 Request data: {data}")
+        print(f"🏢 Company ID: {company_id}")
+        
         track_user_action('create_sprint', {'team_id': data.get('team_id')})
         
         sprint_data = {
@@ -1159,16 +1163,29 @@ def create_sprint():
             'created_at': datetime.utcnow().isoformat()
         }
         
-        if not all([sprint_data['team_id'], sprint_data['name'], sprint_data['start_date'], sprint_data['end_date']]):
-            return jsonify({'error': 'Missing required fields'}), 400
+        print(f"📊 Sprint data to save: {sprint_data}")
         
+        # Validate required fields
+        required_fields = ['team_id', 'name', 'start_date', 'end_date']
+        missing_fields = [field for field in required_fields if not sprint_data.get(field)]
+        
+        if missing_fields:
+            error_msg = f'Missing required fields: {missing_fields}'
+            print(f"❌ Validation error: {error_msg}")
+            return jsonify({'error': error_msg}), 400
+        
+        print("✅ Validation passed, saving to Firestore...")
         doc_ref = db.collection('sprints').add(sprint_data)
         sprint_data['id'] = doc_ref[1].id
         
+        print(f"🎉 Sprint created successfully with ID: {sprint_data['id']}")
         return jsonify({'success': True, 'sprint': sprint_data})
+        
     except Exception as e:
-        print(f"Error creating sprint: {str(e)}")
-        return jsonify({'success': False, 'error': 'Failed to create sprint'}), 500
+        error_msg = f"Error creating sprint: {str(e)}"
+        print(f"💥 {error_msg}")
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': error_msg}), 500
 
 @app.route('/api/sprints/<sprint_id>/complete', methods=['POST'])
 @require_auth
@@ -1249,6 +1266,11 @@ def complete_sprint(sprint_id):
         traceback.print_exc()
         return jsonify({'success': False, 'error': 'Failed to complete sprint'}), 500
 
+@app.route('/api/submit-standup', methods=['POST'])
+@require_auth
+def submit_standup_alt():
+    """Alternative endpoint for standup submission"""
+    return submit_standup()
 # ===== TASK ROUTES =====
 @app.route('/api/tasks', methods=['POST'])
 @require_auth
