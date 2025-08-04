@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useTeam } from '../context/TeamContext';
 import { useCompany } from '../context/CompanyContext';
-import { useRealTime } from '../context/RealTimeContext';
 import { 
   ExclamationTriangleIcon, 
   CheckCircleIcon, 
@@ -18,7 +17,6 @@ import {
 function BlockerManagement() {
   const { currentTeam } = useTeam();
   const { currentCompany } = useCompany();
-  const { isConnected } = useRealTime();
   
   const [blockers, setBlockers] = useState([]);
   const [analytics, setAnalytics] = useState(null);
@@ -26,6 +24,7 @@ function BlockerManagement() {
   const [filter, setFilter] = useState('all'); // all, active, resolved, high, medium, low
   const [selectedBlocker, setSelectedBlocker] = useState(null);
   const [showResolutionModal, setShowResolutionModal] = useState(false);
+  const [isConnected, setIsConnected] = useState(true); // Default to connected
 
   useEffect(() => {
     if (currentTeam?.id && currentCompany?.id) {
@@ -104,6 +103,7 @@ function BlockerManagement() {
       const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/blockers/${blockerId}/escalate`, {
         method: 'POST',
         headers: {
+          'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
           'X-Company-ID': currentCompany.id
         }
@@ -111,36 +111,20 @@ function BlockerManagement() {
       
       if (response.ok) {
         await fetchBlockers();
+        await fetchBlockerAnalytics();
       }
     } catch (error) {
       console.error('Error escalating blocker:', error);
     }
   };
 
-  const getSeverityColor = (severity) => {
-    switch (severity) {
-      case 'high': return 'text-red-600 bg-red-100';
-      case 'medium': return 'text-yellow-600 bg-yellow-100';
-      case 'low': return 'text-blue-600 bg-blue-100';
-      default: return 'text-gray-600 bg-gray-100';
-    }
-  };
-
-  const getSeverityIcon = (severity) => {
-    switch (severity) {
-      case 'high': return <FireIcon className="w-4 h-4" />;
-      case 'medium': return <ExclamationTriangleIcon className="w-4 h-4" />;
-      case 'low': return <ClockIcon className="w-4 h-4" />;
-      default: return <ClockIcon className="w-4 h-4" />;
-    }
-  };
-
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'resolved': return 'text-green-600 bg-green-100';
-      case 'escalated': return 'text-purple-600 bg-purple-100';
-      case 'active': return 'text-orange-600 bg-orange-100';
-      default: return 'text-gray-600 bg-gray-100';
+  const handleResolutionSubmit = async (e) => {
+    e.preventDefault();
+    const formData = new FormData(e.target);
+    const resolution = formData.get('resolution');
+    
+    if (selectedBlocker && resolution.trim()) {
+      await resolveBlocker(selectedBlocker.id, resolution.trim());
     }
   };
 
@@ -164,6 +148,16 @@ function BlockerManagement() {
     return `${Math.floor(diffInHours / 24)}d ago`;
   };
 
+  if (!currentTeam) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="text-center py-8">
+          <p className="text-gray-500">Please select a team to view blockers</p>
+        </div>
+      </div>
+    );
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -176,7 +170,7 @@ function BlockerManagement() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       {/* Header */}
       <div className="mb-8">
         <div className="flex items-center justify-between">
@@ -305,36 +299,45 @@ function BlockerManagement() {
             </p>
           </div>
         ) : (
-          <div className="divide-y">
-            {filteredBlockers.map((blocker) => (
-              <div key={blocker.id} className="p-6 hover:bg-gray-50 transition-colors">
+          <div className="divide-y divide-gray-200">
+            {filteredBlockers.map((blocker, index) => (
+              <div key={index} className="p-6 hover:bg-gray-50 transition-colors">
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <div className="flex items-center space-x-3 mb-2">
-                      <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getSeverityColor(blocker.severity)}`}>
-                        {getSeverityIcon(blocker.severity)}
-                        <span className="ml-1">{blocker.severity.toUpperCase()}</span>
+                      <div className={`w-3 h-3 rounded-full ${
+                        blocker.severity === 'high' ? 'bg-red-500' :
+                        blocker.severity === 'medium' ? 'bg-yellow-500' : 'bg-blue-500'
+                      }`}></div>
+                      <h3 className="text-lg font-medium text-gray-900">
+                        {blocker.keyword || 'General Blocker'}
+                      </h3>
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                        blocker.status === 'active' 
+                          ? 'bg-red-100 text-red-800' 
+                          : 'bg-green-100 text-green-800'
+                      }`}>
+                        {blocker.status}
                       </span>
-                      <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(blocker.status)}`}>
-                        {blocker.status.toUpperCase()}
-                      </span>
-                      <span className="text-sm text-gray-500">
-                        {formatTimeAgo(blocker.created_at)}
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                        blocker.severity === 'high' ? 'bg-red-100 text-red-800' :
+                        blocker.severity === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                        'bg-blue-100 text-blue-800'
+                      }`}>
+                        {blocker.severity} priority
                       </span>
                     </div>
 
-                    <div className="flex items-center space-x-2 mb-2">
-                      <UserIcon className="w-4 h-4 text-gray-400" />
-                      <span className="text-sm font-medium text-gray-900">
+                    <div className="flex items-center space-x-4 text-sm text-gray-600 mb-3">
+                      <div className="flex items-center">
+                        <UserIcon className="w-4 h-4 mr-1" />
                         {blocker.user_name || blocker.user_email}
-                      </span>
-                      <span className="text-sm text-gray-500">•</span>
-                      <span className="text-sm text-gray-500">
-                        Keyword: "{blocker.keyword}"
-                      </span>
+                      </div>
+                      <div className="flex items-center">
+                        <ClockIcon className="w-4 h-4 mr-1" />
+                        {formatTimeAgo(blocker.created_at)}
+                      </div>
                     </div>
-
-                    <p className="text-gray-700 mb-3">{blocker.context}</p>
 
                     {blocker.standup_context && (
                       <div className="bg-gray-50 rounded-lg p-3 mb-3">
@@ -372,7 +375,7 @@ function BlockerManagement() {
                         Escalate
                       </button>
                       <button
-                        className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
+                        className="px-3 py-1 text-sm bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200 transition-colors"
                       >
                         <ChatBubbleLeftRightIcon className="w-4 h-4" />
                       </button>
@@ -388,64 +391,55 @@ function BlockerManagement() {
       {/* Resolution Modal */}
       {showResolutionModal && selectedBlocker && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900">
-                  Resolve Blocker
-                </h3>
+          <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Resolve Blocker</h3>
+              <button
+                onClick={() => setShowResolutionModal(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <XMarkIcon className="w-6 h-6" />
+              </button>
+            </div>
+
+            <div className="mb-4">
+              <p className="text-sm text-gray-600 mb-2">Blocker:</p>
+              <p className="font-medium text-gray-900">{selectedBlocker.keyword}</p>
+              {selectedBlocker.standup_context && (
+                <p className="text-sm text-gray-600 mt-1">{selectedBlocker.standup_context}</p>
+              )}
+            </div>
+
+            <form onSubmit={handleResolutionSubmit}>
+              <div className="mb-4">
+                <label htmlFor="resolution" className="block text-sm font-medium text-gray-700 mb-2">
+                  How was this blocker resolved?
+                </label>
+                <textarea
+                  name="resolution"
+                  rows={3}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Describe how this blocker was resolved..."
+                  required
+                />
+              </div>
+
+              <div className="flex space-x-3">
                 <button
-                  onClick={() => setShowResolutionModal(false)}
-                  className="text-gray-400 hover:text-gray-600"
+                  type="submit"
+                  className="flex-1 bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 transition-colors"
                 >
-                  <XMarkIcon className="w-6 h-6" />
+                  Mark as Resolved
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowResolutionModal(false)}
+                  className="flex-1 bg-gray-200 text-gray-800 py-2 px-4 rounded-md hover:bg-gray-300 transition-colors"
+                >
+                  Cancel
                 </button>
               </div>
-
-              <div className="mb-4">
-                <p className="text-sm text-gray-600 mb-2">Blocker:</p>
-                <p className="text-gray-900 bg-gray-50 rounded p-3 text-sm">
-                  {selectedBlocker.context}
-                </p>
-              </div>
-
-              <form onSubmit={(e) => {
-                e.preventDefault();
-                const resolution = e.target.resolution.value;
-                if (resolution.trim()) {
-                  resolveBlocker(selectedBlocker.id, resolution);
-                }
-              }}>
-                <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    How was this resolved?
-                  </label>
-                  <textarea
-                    name="resolution"
-                    rows={3}
-                    className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Describe how this blocker was resolved..."
-                    required
-                  />
-                </div>
-
-                <div className="flex space-x-3">
-                  <button
-                    type="submit"
-                    className="flex-1 bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 transition-colors"
-                  >
-                    Mark as Resolved
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowResolutionModal(false)}
-                    className="flex-1 bg-gray-200 text-gray-800 py-2 px-4 rounded-md hover:bg-gray-300 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </form>
-            </div>
+            </form>
           </div>
         </div>
       )}
