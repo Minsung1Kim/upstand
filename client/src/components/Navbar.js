@@ -192,14 +192,14 @@ function Navbar() {
                         <button
                           onClick={() => {
                             setShowCompanyDropdown(false);
-                            navigate('/teams', { state: { openCreate: true } }); // Open TeamSettings with create form
+                            navigate('/company/create'); // <-- Change this to your company creation route
                           }}
                           className="block w-full text-left px-4 py-2 text-sm transition-all duration-200"
                           style={{color: colors.neutral[600]}}
                           onMouseEnter={(e) => e.target.style.backgroundColor = colors.primary[50]}
                           onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
                         >
-                          Create Team
+                          Create Company
                         </button>
                       </div>
                     </div>
