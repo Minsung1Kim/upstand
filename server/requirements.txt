@@ -2,7 +2,7 @@ Flask==3.0.0
 Flask-CORS==4.0.0
 Flask-SocketIO==5.3.6
 python-socketio==5.10.0
-python-engineio==4.7.1
+python-engineio==4.8.2
 firebase-admin==6.2.0
 google-cloud-firestore==2.13.1
 google-auth==2.23.4
