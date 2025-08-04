@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from functools import wraps
 from collections import defaultdict, Counter
 
+
 # Flask imports
 from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
@@ -2072,6 +2073,429 @@ def get_productivity_metrics():
         print(f"Error fetching productivity metrics: {str(e)}")
         return jsonify({'success': False, 'error': 'Failed to fetch productivity metrics'}), 500
 
+# ===== BLOCKER MANAGEMENT ROUTES =====
+# Add this entire section to your server/app.py file
+
+@app.route('/api/blockers/active', methods=['GET'])
+@require_auth
+def get_active_blockers():
+    """Get all active blockers for a team"""
+    try:
+        company_id = request.company_id
+        team_id = request.args.get('team_id')
+        
+        if not team_id:
+            return jsonify({'error': 'team_id is required'}), 400
+        
+        track_user_action('view_active_blockers', {'team_id': team_id}, team_id)
+        
+        # Verify team belongs to current company
+        team_ref = db.collection('teams').document(team_id)
+        team_doc = team_ref.get()
+        if not team_doc.exists or team_doc.to_dict().get('company_id') != company_id:
+            return jsonify({'error': 'Team not found or access denied'}), 403
+        
+        # Get last 30 days of standups with blockers
+        end_date = datetime.utcnow()
+        start_date = end_date - timedelta(days=30)
+        
+        standups_ref = db.collection('standups')
+        query = standups_ref.where('team_id', '==', team_id)\
+                          .where('company_id', '==', company_id)\
+                          .where('date', '>=', start_date.strftime('%Y-%m-%d'))
+        
+        standups = query.stream()
+        
+        blockers = []
+        blocker_id_counter = 1
+        
+        for standup in standups:
+            standup_data = standup.to_dict()
+            blocker_analysis = standup_data.get('blocker_analysis', {})
+            
+            if blocker_analysis.get('has_blockers'):
+                for blocker in blocker_analysis.get('blockers', []):
+                    # Check if this blocker has been resolved
+                    blocker_status = get_blocker_status(standup.id, blocker.get('keyword', ''))
+                    
+                    blockers.append({
+                        'id': f"{standup.id}_{blocker_id_counter}",
+                        'standup_id': standup.id,
+                        'user_id': standup_data.get('user_id'),
+                        'user_email': standup_data.get('user_email'),
+                        'user_name': standup_data.get('user_name', standup_data.get('user_email')),
+                        'keyword': blocker.get('keyword', ''),
+                        'context': blocker.get('context', ''),
+                        'severity': blocker.get('severity', 'low'),
+                        'status': blocker_status.get('status', 'active'),
+                        'created_at': standup_data.get('created_at'),
+                        'date': standup_data.get('date'),
+                        'standup_context': standup_data.get('blockers', ''),
+                        'resolution': blocker_status.get('resolution'),
+                        'resolved_at': blocker_status.get('resolved_at'),
+                        'resolved_by': blocker_status.get('resolved_by'),
+                        'escalated': blocker_status.get('escalated', False)
+                    })
+                    blocker_id_counter += 1
+        
+        # Sort by creation date, newest first
+        blockers.sort(key=lambda x: x['created_at'], reverse=True)
+        
+        return jsonify({
+            'success': True,
+            'blockers': blockers,
+            'total_count': len(blockers)
+        })
+        
+    except Exception as e:
+        print(f"Error fetching active blockers: {str(e)}")
+        return jsonify({'success': False, 'error': 'Failed to fetch blockers'}), 500
+
+@app.route('/api/blockers/<blocker_id>/resolve', methods=['POST'])
+@require_auth
+def resolve_blocker(blocker_id):
+    """Mark a blocker as resolved"""
+    try:
+        company_id = request.company_id
+        user_id = request.user_id
+        user_email = request.user_email
+        data = request.get_json()
+        
+        resolution = data.get('resolution', '').strip()
+        if not resolution:
+            return jsonify({'error': 'Resolution description is required'}), 400
+        
+        # Parse blocker ID to get standup ID and blocker info
+        parts = blocker_id.split('_')
+        if len(parts) < 2:
+            return jsonify({'error': 'Invalid blocker ID'}), 400
+        
+        standup_id = parts[0]
+        
+        # Verify the standup exists and belongs to user's company
+        standup_ref = db.collection('standups').document(standup_id)
+        standup_doc = standup_ref.get()
+        
+        if not standup_doc.exists:
+            return jsonify({'error': 'Standup not found'}), 404
+        
+        standup_data = standup_doc.to_dict()
+        if standup_data.get('company_id') != company_id:
+            return jsonify({'error': 'Access denied'}), 403
+        
+        # Create or update blocker resolution record
+        resolution_data = {
+            'blocker_id': blocker_id,
+            'standup_id': standup_id,
+            'team_id': standup_data.get('team_id'),
+            'company_id': company_id,
+            'resolution': resolution,
+            'resolved_by': user_email,
+            'resolved_by_id': user_id,
+            'resolved_at': datetime.utcnow().isoformat(),
+            'status': 'resolved'
+        }
+        
+        # Save resolution to blocker_resolutions collection
+        db.collection('blocker_resolutions').add(resolution_data)
+        
+        track_user_action('resolve_blocker', {
+            'blocker_id': blocker_id,
+            'standup_id': standup_id,
+            'team_id': standup_data.get('team_id')
+        }, standup_data.get('team_id'))
+        
+        # Emit real-time update
+        socketio.emit('blocker_resolved', {
+            'blocker_id': blocker_id,
+            'resolved_by': user_email,
+            'resolution': resolution,
+            'team_id': standup_data.get('team_id')
+        }, room=f"team_{company_id}_{standup_data.get('team_id')}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Blocker resolved successfully'
+        })
+        
+    except Exception as e:
+        print(f"Error resolving blocker: {str(e)}")
+        return jsonify({'success': False, 'error': 'Failed to resolve blocker'}), 500
+
+@app.route('/api/blockers/<blocker_id>/escalate', methods=['POST'])
+@require_auth
+def escalate_blocker(blocker_id):
+    """Escalate a blocker to team lead/management"""
+    try:
+        company_id = request.company_id
+        user_id = request.user_id
+        user_email = request.user_email
+        
+        # Parse blocker ID to get standup ID
+        parts = blocker_id.split('_')
+        if len(parts) < 2:
+            return jsonify({'error': 'Invalid blocker ID'}), 400
+        
+        standup_id = parts[0]
+        
+        # Verify the standup exists and belongs to user's company
+        standup_ref = db.collection('standups').document(standup_id)
+        standup_doc = standup_ref.get()
+        
+        if not standup_doc.exists:
+            return jsonify({'error': 'Standup not found'}), 404
+        
+        standup_data = standup_doc.to_dict()
+        if standup_data.get('company_id') != company_id:
+            return jsonify({'error': 'Access denied'}), 403
+        
+        # Create escalation record
+        escalation_data = {
+            'blocker_id': blocker_id,
+            'standup_id': standup_id,
+            'team_id': standup_data.get('team_id'),
+            'company_id': company_id,
+            'escalated_by': user_email,
+            'escalated_by_id': user_id,
+            'escalated_at': datetime.utcnow().isoformat(),
+            'status': 'escalated',
+            'original_blocker': standup_data.get('blockers', ''),
+            'original_user': standup_data.get('user_email', '')
+        }
+        
+        # Save escalation
+        db.collection('blocker_escalations').add(escalation_data)
+        
+        track_user_action('escalate_blocker', {
+            'blocker_id': blocker_id,
+            'standup_id': standup_id,
+            'team_id': standup_data.get('team_id')
+        }, standup_data.get('team_id'))
+        
+        # Emit real-time update to team leads
+        socketio.emit('blocker_escalated', {
+            'blocker_id': blocker_id,
+            'escalated_by': user_email,
+            'team_id': standup_data.get('team_id'),
+            'severity': 'high',  # Escalated blockers are high priority
+            'context': standup_data.get('blockers', '')
+        }, room=f"team_{company_id}_{standup_data.get('team_id')}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Blocker escalated successfully'
+        })
+        
+    except Exception as e:
+        print(f"Error escalating blocker: {str(e)}")
+        return jsonify({'success': False, 'error': 'Failed to escalate blocker'}), 500
+
+@app.route('/api/blockers/analytics', methods=['GET'])
+@require_auth
+def get_blocker_analytics():
+    """Get comprehensive blocker analytics for a team"""
+    try:
+        company_id = request.company_id
+        team_id = request.args.get('team_id')
+        
+        if not team_id:
+            return jsonify({'error': 'team_id is required'}), 400
+        
+        track_user_action('view_blocker_analytics', {'team_id': team_id}, team_id)
+        
+        # Get last 30 days of data
+        end_date = datetime.utcnow()
+        start_date = end_date - timedelta(days=30)
+        
+        # Get standups with blockers
+        standups_ref = db.collection('standups')
+        query = standups_ref.where('team_id', '==', team_id)\
+                          .where('company_id', '==', company_id)\
+                          .where('date', '>=', start_date.strftime('%Y-%m-%d'))
+        
+        standups = list(query.stream())
+        
+        # Calculate analytics
+        total_standups = len(standups)
+        standups_with_blockers = 0
+        severity_counts = {'high': 0, 'medium': 0, 'low': 0}
+        keyword_counts = defaultdict(int)
+        daily_blocker_trend = defaultdict(int)
+        user_blocker_counts = defaultdict(int)
+        resolution_times = []
+        
+        for standup in standups:
+            standup_data = standup.to_dict()
+            blocker_analysis = standup_data.get('blocker_analysis', {})
+            
+            if blocker_analysis.get('has_blockers'):
+                standups_with_blockers += 1
+                severity = blocker_analysis.get('severity', 'low')
+                severity_counts[severity] += 1
+                
+                # Count by date for trend
+                date = standup_data.get('date')
+                if date:
+                    daily_blocker_trend[date] += 1
+                
+                # Count by user
+                user_email = standup_data.get('user_email', 'Unknown')
+                user_blocker_counts[user_email] += 1
+                
+                # Count keywords
+                for blocker in blocker_analysis.get('blockers', []):
+                    keyword = blocker.get('keyword', '')
+                    if keyword:
+                        keyword_counts[keyword] += 1
+        
+        # Get resolution data
+        resolutions_ref = db.collection('blocker_resolutions')
+        resolutions_query = resolutions_ref.where('team_id', '==', team_id)\
+                                         .where('company_id', '==', company_id)
+        
+        resolved_count = 0
+        avg_resolution_time = 0
+        
+        for resolution in resolutions_query.stream():
+            resolved_count += 1
+            # Calculate resolution time if we have the data
+            resolution_data = resolution.to_dict()
+            resolved_at = resolution_data.get('resolved_at')
+            # Note: We'd need to store blocker creation time to calculate this properly
+        
+        # Calculate blocker percentage
+        blocker_percentage = (standups_with_blockers / total_standups * 100) if total_standups > 0 else 0
+        
+        # Prepare trend data
+        trend_data = []
+        for date, count in sorted(daily_blocker_trend.items()):
+            trend_data.append({
+                'date': date,
+                'blocker_count': count
+            })
+        
+        # Top keywords
+        top_keywords = sorted(keyword_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+        
+        # Top affected users
+        top_users = sorted(user_blocker_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+        
+        analytics = {
+            'total_standups': total_standups,
+            'standups_with_blockers': standups_with_blockers,
+            'blocker_percentage': round(blocker_percentage, 1),
+            'blocker_severity_counts': severity_counts,
+            'resolved_blockers': resolved_count,
+            'common_blocker_keywords': dict(top_keywords),
+            'blocker_trend': trend_data,
+            'top_affected_users': [{'user': user, 'count': count} for user, count in top_users],
+            'summary': {
+                'most_common_keyword': top_keywords[0][0] if top_keywords else 'None',
+                'most_affected_user': top_users[0][0] if top_users else 'None',
+                'trend_direction': 'increasing' if len(trend_data) >= 2 and trend_data[-1]['blocker_count'] > trend_data[-2]['blocker_count'] else 'stable'
+            }
+        }
+        
+        return jsonify({
+            'success': True,
+            'blocker_analytics': analytics
+        })
+        
+    except Exception as e:
+        print(f"Error fetching blocker analytics: {str(e)}")
+        return jsonify({'success': False, 'error': 'Failed to fetch analytics'}), 500
+
+@app.route('/api/blockers/team-summary', methods=['GET'])
+@require_auth
+def get_team_blocker_summary():
+    """Get a summary of team blockers for dashboard"""
+    try:
+        company_id = request.company_id
+        team_id = request.args.get('team_id')
+        
+        if not team_id:
+            return jsonify({'error': 'team_id is required'}), 400
+        
+        # Get today's blockers
+        today = datetime.utcnow().strftime('%Y-%m-%d')
+        
+        standups_ref = db.collection('standups')
+        today_query = standups_ref.where('team_id', '==', team_id)\
+                                 .where('company_id', '==', company_id)\
+                                 .where('date', '==', today)
+        
+        active_blockers = []
+        high_priority_count = 0
+        
+        for standup in today_query.stream():
+            standup_data = standup.to_dict()
+            blocker_analysis = standup_data.get('blocker_analysis', {})
+            
+            if blocker_analysis.get('has_blockers'):
+                severity = blocker_analysis.get('severity', 'low')
+                if severity == 'high':
+                    high_priority_count += 1
+                
+                for blocker in blocker_analysis.get('blockers', []):
+                    # Check if still active
+                    status = get_blocker_status(standup.id, blocker.get('keyword', ''))
+                    if status.get('status') == 'active':
+                        active_blockers.append({
+                            'user': standup_data.get('user_name', standup_data.get('user_email')),
+                            'keyword': blocker.get('keyword', ''),
+                            'severity': severity,
+                            'context': blocker.get('context', '')[:100] + '...' if len(blocker.get('context', '')) > 100 else blocker.get('context', '')
+                        })
+        
+        return jsonify({
+            'success': True,
+            'summary': {
+                'active_blockers_today': len(active_blockers),
+                'high_priority_count': high_priority_count,
+                'blockers': active_blockers[:5],  # Top 5 for dashboard
+                'needs_attention': high_priority_count > 0
+            }
+        })
+        
+    except Exception as e:
+        print(f"Error fetching team blocker summary: {str(e)}")
+        return jsonify({'success': False, 'error': 'Failed to fetch summary'}), 500
+
+def get_blocker_status(standup_id, keyword):
+    """Helper function to get the current status of a blocker"""
+    try:
+        # Check if blocker has been resolved
+        resolutions_ref = db.collection('blocker_resolutions')
+        resolution_query = resolutions_ref.where('standup_id', '==', standup_id).limit(1)
+        
+        for resolution in resolution_query.stream():
+            resolution_data = resolution.to_dict()
+            return {
+                'status': 'resolved',
+                'resolution': resolution_data.get('resolution'),
+                'resolved_at': resolution_data.get('resolved_at'),
+                'resolved_by': resolution_data.get('resolved_by')
+            }
+        
+        # Check if blocker has been escalated
+        escalations_ref = db.collection('blocker_escalations')
+        escalation_query = escalations_ref.where('standup_id', '==', standup_id).limit(1)
+        
+        for escalation in escalation_query.stream():
+            escalation_data = escalation.to_dict()
+            return {
+                'status': 'escalated',
+                'escalated_at': escalation_data.get('escalated_at'),
+                'escalated_by': escalation_data.get('escalated_by')
+            }
+        
+        # Default to active
+        return {'status': 'active'}
+        
+    except Exception as e:
+        print(f"Error getting blocker status: {str(e)}")
+        return {'status': 'active'}
+
 # ===== TEAM MEMBER ROUTES =====
 @app.route('/api/teams/<team_id>/members', methods=['POST'])
 @require_auth
@@ -2265,6 +2689,7 @@ def join_team(team_id):
         print(f"Error joining team: {str(e)}")
         return jsonify({'error': 'Failed to join team'}), 500
     
+
 
 # ===== ANALYTICS ROUTES =====
 @app.route('/api/analytics/dashboard', methods=['GET'])

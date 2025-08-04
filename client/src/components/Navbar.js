@@ -90,6 +90,15 @@ function Navbar() {
                     onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}>
                 Retro
               </Link>
+
+              <Link to="/blockers" 
+                    className="px-3 py-2 rounded-md hover:bg-opacity-20 transition-all duration-200 font-medium"
+                    style={{color: '#ef4444'}}
+                    onMouseEnter={(e) => e.target.style.backgroundColor = 'rgba(239, 68, 68, 0.2)'}
+                    onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}>
+                🚫 Blockers
+              </Link>
+
               <Link to="/teams" 
                     className="px-3 py-2 rounded-md hover:bg-opacity-20 transition-all duration-200 font-medium"
                     style={{color: colors.primary[100]}}
@@ -106,34 +115,25 @@ function Navbar() {
               </Link>
             </div>
           </div>
-          
+
           <div className="flex items-center space-x-4">
             {/* Company Selector */}
-            {currentCompany && (
+            {currentCompany && userCompanies.length > 1 && (
               <div className="relative" ref={companyDropdownRef}>
                 <button
                   onClick={() => setShowCompanyDropdown(!showCompanyDropdown)}
-                  className="flex items-center space-x-2 rounded-lg px-4 py-2 transition-all duration-200 border"
+                  className="text-sm font-medium px-3 py-2 rounded-lg transition-all duration-200 border flex items-center space-x-1"
                   style={{
-                    backgroundColor: colors.primary[200],
-                    color: colors.secondary[500],
-                    borderColor: colors.primary[300]
+                    backgroundColor: colors.primary[200] + '20',
+                    color: colors.primary[200],
+                    borderColor: colors.primary[200] + '40'
                   }}
-                  onMouseEnter={(e) => {
-                    e.target.style.backgroundColor = colors.primary[300];
-                    e.target.style.transform = 'translateY(-1px)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.target.style.backgroundColor = colors.primary[200];
-                    e.target.style.transform = 'translateY(0)';
-                  }}
+                  onMouseEnter={(e) => e.target.style.backgroundColor = colors.primary[200] + '30'}
+                  onMouseLeave={(e) => e.target.style.backgroundColor = colors.primary[200] + '20'}
                 >
-                  <div className="text-left">
-                    <div className="text-xs opacity-70 font-medium">Company</div>
-                    <div className="text-sm font-bold">{currentCompany.name}</div>
-                  </div>
+                  <span>{currentCompany.name}</span>
                   <svg 
-                    className={`w-4 h-4 transition-transform ${showCompanyDropdown ? 'rotate-180' : ''}`} 
+                    className={`w-4 h-4 transition-transform duration-200 ${showCompanyDropdown ? 'rotate-180' : ''}`}
                     fill="none" 
                     stroke="currentColor" 
                     viewBox="0 0 24 24"
@@ -142,21 +142,20 @@ function Navbar() {
                   </svg>
                 </button>
 
-                {/* Company Dropdown Menu */}
                 {showCompanyDropdown && (
-                  <div className="absolute top-full right-0 mt-2 w-64 bg-white rounded-lg shadow-xl border-2 z-50"
-                       style={{borderColor: colors.primary[200]}}>
+                  <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-lg border z-50"
+                       style={{borderColor: colors.neutral[200]}}>
                     <div className="py-2">
-                      <div className="px-4 py-2 text-xs font-semibold uppercase tracking-wide"
-                           style={{color: colors.secondary[400]}}>
+                      <div className="px-4 py-2 text-xs font-medium border-b" 
+                           style={{color: colors.neutral[500], borderColor: colors.neutral[200]}}>
                         Switch Company
                       </div>
                       {userCompanies.map((company) => (
                         <button
                           key={company.id}
                           onClick={() => handleCompanySwitch(company)}
-                          className="w-full text-left px-4 py-3 text-sm flex items-center justify-between transition-all duration-200"
-                          style={currentCompany.id === company.id ?
+                          className="w-full text-left px-4 py-3 flex items-center justify-between transition-all duration-200"
+                          style={currentCompany.id === company.id ? 
                             {backgroundColor: colors.primary[200], color: colors.secondary[500]} : 
                             {color: colors.neutral[700]}
                           }

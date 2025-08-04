@@ -20,7 +20,7 @@ import Retrospective from './pages/Retrospective';
 import PrivateRoute from './components/PrivateRoute';
 import SprintManagement from './pages/SprintManagement';
 import Analytics from './pages/Analytics';
-
+import BlockerManagement from './pages/BlockerManagement';
 
 // WebSocket Connection Component
 function WebSocketManager() {
@@ -97,6 +97,7 @@ function AppContent() {
           <Route path="/sprint-management" element={<SprintManagement />} />
           <Route path="/retrospectives" element={<Retrospective />} />
           <Route path="/analytics" element={<Analytics />} />
+          <Route path="/blockers" element={<BlockerManagement />} />
         </Route>
         
         {/* Catch all route */}
