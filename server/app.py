@@ -1166,6 +1166,8 @@ def create_sprint():
             print("❌ Missing required fields")
             return jsonify({'success': False, 'error': 'Missing required fields: team_id, name, startDate, endDate'}), 400
         
+        track_user_action('create_sprint', {'team_id': team_id}, team_id)
+        
         sprint_data = {
             'team_id': team_id,
             'company_id': company_id,
@@ -1189,11 +1191,38 @@ def create_sprint():
             sprint_data['id'] = sprint_id
             print(f"✅ Sprint created successfully with id: {sprint_id}")
             
+            # Verify the document was actually saved
+            saved_doc = db.collection('sprints').document(sprint_id).get()
+            if saved_doc.exists:
+                print(f"✅ Verified sprint exists in database")
+            else:
+                print(f"❌ Sprint not found in database after creation!")
+                
+            # Initialize analytics
+            sprint_data['analytics'] = {
+                'total_story_points': 0,
+                'completed_story_points': 0,
+                'completion_percentage': 0,
+                'task_counts': {'todo': 0, 'in_progress': 0, 'done': 0},
+                'total_tasks': 0
+            }
+            
+            # Broadcast real-time update
+            try:
+                socketio.emit('sprint_created', {
+                    'sprint': sprint_data,
+                    'team_id': team_id
+                }, room=f"team_{company_id}_{team_id}")
+            except Exception as socket_error:
+                print(f"Socket emit error: {socket_error}")
+                # Don't fail the request if socket fails
+            
             return jsonify({'success': True, 'sprint': sprint_data})
             
         except Exception as firestore_error:
             print(f"💥 Firestore error: {str(firestore_error)}")
-            return jsonify({'success': False, 'error': 'Database write failed'}), 500
+            traceback.print_exc()
+            return jsonify({'success': False, 'error': f'Database save failed: {str(firestore_error)}'}), 500
             
     except Exception as e:
         print(f"💥 Sprint creation error: {str(e)}")
@@ -1603,62 +1632,88 @@ def create_retrospective():
         print(f"Error creating retrospective: {str(e)}")
         return jsonify({'success': False, 'error': 'Failed to create retrospective'}), 500
     
-@app.route('/api/retrospective-feedback', methods=['GET'])
+@app.route('/api/retrospective-feedback', methods=['POST'])
 @require_auth
-def get_retrospective_feedback():
-    """Get retrospective feedback for a team"""
+def submit_retrospective_feedback():
+    """Submit retrospective feedback with AI analysis"""
     try:
+        # Check database connection
+        if not db:
+            print("Database connection not available")
+            return jsonify({'success': False, 'error': 'Database connection not available'}), 503
+            
+        data = request.get_json()
         company_id = request.company_id
-        team_id = request.args.get('team_id')
+        team_id = data.get('team_id')
         
         if not team_id:
             return jsonify({'error': 'team_id is required'}), 400
         
-        track_user_action('view_retrospective_feedback', {'team_id': team_id}, team_id)
+        track_user_action('submit_retrospective_feedback', {'team_id': team_id}, team_id)
         
-        feedback_ref = db.collection('retrospective_feedback')
-        query = feedback_ref.where('team_id', '==', team_id)\
-                           .where('company_id', '==', company_id)\
-                           .order_by('created_at', direction=firestore.Query.DESCENDING)
+        # Verify team belongs to current company
+        team_ref = db.collection('teams').document(team_id)
+        team_doc = team_ref.get()
+        if not team_doc.exists or team_doc.to_dict().get('company_id') != company_id:
+            return jsonify({'error': 'Team not found or access denied'}), 403
         
-        feedback_docs = query.stream()
+        # Use ISO timestamp instead of SERVER_TIMESTAMP for WebSocket compatibility
+        current_time = datetime.utcnow().isoformat()
         
-        feedback_list = []
-        for feedback in feedback_docs:
-            feedback_data = feedback.to_dict()
-            feedback_data['id'] = feedback.id
-            
-            # Convert server timestamp to string if needed
-            if hasattr(feedback_data.get('created_at'), 'isoformat'):
-                feedback_data['created_at'] = feedback_data['created_at'].isoformat()
-            
-            # Don't expose user info for anonymous feedback
-            if feedback_data.get('anonymous', True):
-                feedback_data.pop('created_by', None)
-            
-            feedback_list.append(feedback_data)
-        
-        # Group feedback by category
-        categorized_feedback = {
-            'went_well': [],
-            'could_improve': [],
-            'action_items': []
+        feedback_data = {
+            'team_id': team_id,
+            'company_id': company_id,
+            'category': data.get('category'),  # went_well, could_improve, action_items
+            'feedback': data.get('feedback'),
+            'anonymous': data.get('anonymous', True),
+            'created_by': request.user_id if not data.get('anonymous') else None,
+            'created_at': current_time
         }
         
-        for feedback in feedback_list:
-            category = feedback.get('category', 'could_improve')
-            if category in categorized_feedback:
-                categorized_feedback[category].append(feedback)
+        # Basic AI analysis for the feedback
+        feedback_text = feedback_data['feedback']
+        category = feedback_data['category']
+        
+        analysis = {
+            'themes': [{
+                'title': f"{category.replace('_', ' ').title()} Feedback",
+                'sentiment': 'positive' if category == 'went_well' else 'neutral' if category == 'action_items' else 'negative',
+                'items': [feedback_text],
+                'actionable': category == 'action_items' or 'should' in feedback_text.lower()
+            }],
+            'overall_sentiment': f"Team member provided {category.replace('_', ' ')} feedback",
+            'suggested_actions': [f"Review and discuss: {feedback_text[:50]}..."] if len(feedback_text) > 50 else [f"Review: {feedback_text}"]
+        }
+        
+        # Save to Firestore
+        doc_ref = db.collection('retrospective_feedback').add(feedback_data)
+        feedback_id = doc_ref[1].id
+        
+        print(f"✅ Retrospective feedback saved with ID: {feedback_id}")
+        
+        # Emit real-time update
+        try:
+            socketio.emit('retrospective_feedback_added', {
+                'feedback_id': feedback_id,
+                'team_id': team_id,
+                'category': category,
+                'anonymous': feedback_data['anonymous']
+            }, room=f"team_{company_id}_{team_id}")
+        except Exception as socket_error:
+            print(f"Socket emit error: {socket_error}")
+            # Don't fail the request if socket fails
         
         return jsonify({
             'success': True,
-            'feedback': categorized_feedback,
-            'total_count': len(feedback_list)
+            'feedback_id': feedback_id,
+            'analysis': analysis,
+            'message': 'Feedback submitted successfully'
         })
         
     except Exception as e:
-        print(f"Error fetching retrospective feedback: {str(e)}")
-        return jsonify({'success': False, 'error': 'Failed to fetch feedback'}), 500
+        print(f"Error submitting retrospective feedback: {str(e)}")
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': 'Failed to submit feedback'}), 500
 
 
 # ===== ANALYTICS ROUTES =====
