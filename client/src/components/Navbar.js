@@ -96,7 +96,7 @@ function Navbar() {
                     style={{color: '#ef4444'}}
                     onMouseEnter={(e) => e.target.style.backgroundColor = 'rgba(239, 68, 68, 0.2)'}
                     onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}>
-                🚫 Blockers
+                 Blockers
               </Link>
 
               <Link to="/teams" 
