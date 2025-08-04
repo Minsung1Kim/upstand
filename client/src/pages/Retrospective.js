@@ -35,7 +35,7 @@ function Retrospective() {
     if (!currentTeam || !feedback.trim()) {
       return;
     }
-
+ 
     setLoading(true);
     
     try {
