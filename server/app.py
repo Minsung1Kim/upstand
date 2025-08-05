@@ -207,13 +207,24 @@ def require_auth(f):
 # Add this enhanced detect_blockers function to your server/app.py
 # Replace the existing detect_blockers function with this:
 
+def detect_blockers_keyword(text):
+    """Basic keyword-based blocker detection (no recursion)"""
+    keywords = ['blocker', 'stuck', 'impediment', 'issue', 'problem', 'delay', 'blocked']
+    found = [kw for kw in keywords if kw in (text or '').lower()]
+    return {
+        'has_blockers': bool(found),
+        'blockers': [{'keyword': kw, 'context': text, 'severity': 'medium'} for kw in found],
+        'severity': 'medium' if found else 'none',
+        'blocker_count': len(found)
+    }
+
 def detect_blockers(text, use_ai=True):
     """Enhanced blocker detection with both keyword matching and AI analysis"""
     if not text:
         return {'has_blockers': False, 'blockers': [], 'severity': 'none', 'blocker_count': 0}
     
-    # Original keyword detection (keep as fallback)
-    keyword_result = detect_blockers(text)
+    # Use the basic keyword detection (no recursion)
+    keyword_result = detect_blockers_keyword(text)
     
     if not use_ai or not os.getenv('OPENAI_API_KEY'):
         return keyword_result
