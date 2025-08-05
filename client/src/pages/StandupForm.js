@@ -145,29 +145,95 @@ function StandupForm() {
             Standup submitted successfully!
           </div>
 
-          {/* Blocker Analysis */}
-          {response.blocker_analysis && response.blocker_analysis.has_blockers && (
-            <div className="bg-white rounded-lg shadow p-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">🚨 Detected Blockers</h2>
-              <div className="space-y-2">
-                {response.blocker_analysis.blockers.map((blocker, index) => (
-                <div key={index} className="flex items-start space-x-2">
-                  <ExclamationCircleIcon className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
-                  <p className="text-sm text-gray-700">
-                    {typeof blocker === 'string' ? blocker : blocker.keyword || blocker.context || 'Blocker detected'}
-                  </p>
-                </div>
-              ))}
-              </div>
-              <p className="mt-3 text-sm text-gray-600">
-                Severity: <span className={`font-medium ${
-                  response.blocker_analysis.severity === 'high' ? 'text-red-600' :
-                  response.blocker_analysis.severity === 'medium' ? 'text-yellow-600' :
-                  'text-green-600'
-                }`}>{response.blocker_analysis.severity}</span>
-              </p>
+          // Replace the Blocker Analysis section in StandupForm.js with this enhanced version:
+
+      {/* Enhanced Blocker Analysis */}
+      {response.blocker_analysis && response.blocker_analysis.has_blockers && (
+        <div className="bg-white rounded-lg shadow p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">🚨 Detected Blockers</h2>
+          
+          {/* AI Overall Analysis */}
+          {response.blocker_analysis.ai_analysis && (
+            <div className="bg-blue-50 rounded-lg p-4 mb-4">
+              <h3 className="text-sm font-semibold text-blue-900 mb-2">🤖 AI Analysis</h3>
+              <p className="text-sm text-blue-800">{response.blocker_analysis.ai_analysis}</p>
             </div>
           )}
+          
+          {/* Individual Blockers */}
+          <div className="space-y-3">
+            {response.blocker_analysis.blockers.map((blocker, index) => (
+              <div key={index} className="border border-gray-200 rounded-lg p-4">
+                <div className="flex items-start space-x-3 mb-2">
+                  <ExclamationCircleIcon className={`w-5 h-5 flex-shrink-0 mt-0.5 ${
+                    blocker.severity === 'high' ? 'text-red-500' :
+                    blocker.severity === 'medium' ? 'text-yellow-500' : 'text-blue-500'
+                  }`} />
+                  <div className="flex-1">
+                    <div className="flex items-center space-x-2 mb-1">
+                      <h4 className="text-sm font-medium text-gray-900">
+                        {typeof blocker === 'string' ? blocker : blocker.keyword || 'Blocker detected'}
+                      </h4>
+                      {blocker.severity && (
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                          blocker.severity === 'high' ? 'bg-red-100 text-red-800' :
+                          blocker.severity === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                          'bg-blue-100 text-blue-800'
+                        }`}>
+                          {blocker.severity} priority
+                        </span>
+                      )}
+                      {blocker.detection_method && (
+                        <span className="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-600">
+                          {blocker.detection_method === 'ai' ? '🤖 AI' : '🔍 Keyword'}
+                        </span>
+                      )}
+                    </div>
+                    
+                    {blocker.context && typeof blocker === 'object' && (
+                      <p className="text-sm text-gray-600 mb-2">{blocker.context}</p>
+                    )}
+                    
+                    {/* AI Suggestions */}
+                    {blocker.ai_suggestions && blocker.ai_suggestions.length > 0 && (
+                      <div className="bg-green-50 rounded p-3 mt-2">
+                        <p className="text-xs font-medium text-green-800 mb-1">💡 AI Suggestions:</p>
+                        <ul className="text-xs text-green-700 space-y-1">
+                          {blocker.ai_suggestions.map((suggestion, i) => (
+                            <li key={i} className="flex items-start">
+                              <span className="mr-1">•</span>
+                              <span>{suggestion}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          
+          <div className="mt-4 flex items-center justify-between">
+            <p className="text-sm text-gray-600">
+              Overall Severity: <span className={`font-medium ${
+                response.blocker_analysis.severity === 'high' ? 'text-red-600' :
+                response.blocker_analysis.severity === 'medium' ? 'text-yellow-600' :
+                'text-green-600'
+              }`}>{response.blocker_analysis.severity}</span>
+            </p>
+            {response.blocker_analysis.sentiment && (
+              <p className="text-sm text-gray-600">
+                Sentiment: <span className={`font-medium ${
+                  response.blocker_analysis.sentiment === 'positive' ? 'text-green-600' :
+                  response.blocker_analysis.sentiment === 'negative' ? 'text-red-600' :
+                  'text-yellow-600'
+                }`}>{response.blocker_analysis.sentiment}</span>
+              </p>
+            )}
+          </div>
+        </div>
+      )}
 
           {/* Sentiment Analysis */}
           <div className="bg-white rounded-lg shadow p-6">

@@ -204,43 +204,217 @@ def require_auth(f):
         return f(*args, **kwargs)
     return decorated_function
 
-def detect_blockers(text):
-    """Enhanced blocker detection with severity levels"""
+# Add this enhanced detect_blockers function to your server/app.py
+# Replace the existing detect_blockers function with this:
+
+def detect_blockers_with_ai(text, use_ai=True):
+    """Enhanced blocker detection with both keyword matching and AI analysis"""
     if not text:
         return {'has_blockers': False, 'blockers': [], 'severity': 'none', 'blocker_count': 0}
     
-    text_lower = text.lower()
+    # Original keyword detection (keep as fallback)
+    keyword_result = detect_blockers(text)
     
-    blocker_keywords = {
-        'high': ['blocked', 'blocker', 'urgent', 'critical', 'stuck', 'cannot proceed', 'show stopper', 'dependency', 'waiting for'],
-        'medium': ['issue', 'problem', 'difficulty', 'challenge', 'concern', 'impediment', 'delay', 'slow'],
-        'low': ['minor', 'small issue', 'question', 'clarification needed', 'help needed']
-    }
+    if not use_ai or not os.getenv('OPENAI_API_KEY'):
+        return keyword_result
     
-    detected_blockers = []
-    severity = 'none'
-    
-    for sev_level, keywords in blocker_keywords.items():
-        for keyword in keywords:
-            if keyword in text_lower:
-                detected_blockers.append({
-                    'keyword': keyword,
-                    'severity': sev_level,
-                    'context': text[:100] + '...' if len(text) > 100 else text
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        
+        prompt = f"""
+        Analyze the following standup text for blockers, impediments, and issues. 
+        
+        Text: "{text}"
+        
+        Please provide a JSON response with:
+        1. has_blockers: boolean - whether there are any blockers
+        2. blockers: array of objects with:
+           - keyword: the main blocker term
+           - severity: "high", "medium", or "low"
+           - context: brief explanation of the blocker
+           - suggestions: array of 1-2 suggested actions to resolve
+        3. overall_severity: "high", "medium", "low", or "none"
+        4. sentiment: "positive", "neutral", or "negative"
+        5. analysis: brief overall analysis of the situation
+        
+        Focus on real blockers that prevent progress, not just minor issues.
+        
+        Respond with ONLY valid JSON, no other text.
+        """
+        
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=500,
+            temperature=0.3
+        )
+        
+        ai_result = response.choices[0].message.content.strip()
+        
+        # Clean up response (remove markdown if present)
+        if ai_result.startswith('```json'):
+            ai_result = ai_result[7:]
+        if ai_result.endswith('```'):
+            ai_result = ai_result[:-3]
+        
+        import json
+        ai_analysis = json.loads(ai_result)
+        
+        # Merge keyword detection with AI analysis
+        enhanced_blockers = []
+        
+        # Add AI-detected blockers
+        for blocker in ai_analysis.get('blockers', []):
+            enhanced_blockers.append({
+                'keyword': blocker.get('keyword', ''),
+                'severity': blocker.get('severity', 'medium'),
+                'context': blocker.get('context', text[:100]),
+                'ai_suggestions': blocker.get('suggestions', []),
+                'detection_method': 'ai'
+            })
+        
+        # Add keyword-detected blockers that AI might have missed
+        for kw_blocker in keyword_result.get('blockers', []):
+            # Check if similar blocker already exists from AI
+            existing = False
+            for ai_blocker in enhanced_blockers:
+                if kw_blocker['keyword'].lower() in ai_blocker['keyword'].lower():
+                    existing = True
+                    break
+            
+            if not existing:
+                enhanced_blockers.append({
+                    **kw_blocker,
+                    'detection_method': 'keyword'
                 })
-                if sev_level == 'high':
-                    severity = 'high'
-                elif sev_level == 'medium' and severity != 'high':
-                    severity = 'medium'
-                elif severity == 'none':
-                    severity = 'low'
-    
-    return {
-        'has_blockers': len(detected_blockers) > 0,
-        'blockers': detected_blockers,
-        'severity': severity,
-        'blocker_count': len(detected_blockers)
-    }
+        
+        return {
+            'has_blockers': len(enhanced_blockers) > 0,
+            'blockers': enhanced_blockers,
+            'severity': ai_analysis.get('overall_severity', keyword_result.get('severity', 'none')),
+            'blocker_count': len(enhanced_blockers),
+            'ai_analysis': ai_analysis.get('analysis', ''),
+            'sentiment': ai_analysis.get('sentiment', 'neutral')
+        }
+        
+    except Exception as e:
+        print(f"Error in AI blocker detection: {e}")
+        # Fall back to keyword detection
+        return keyword_result
+
+# Add new API endpoints for enhanced blocker management:
+
+@app.route('/api/blockers/<blocker_id>/priority', methods=['PUT'])
+@require_auth
+def update_blocker_priority():
+    """Update blocker priority"""
+    try:
+        blocker_id = request.view_args['blocker_id']
+        data = request.get_json()
+        new_priority = data.get('priority')
+        
+        if new_priority not in ['high', 'medium', 'low']:
+            return jsonify({'error': 'Invalid priority'}), 400
+        
+        # Update the blocker priority in your database
+        # For now, we'll track this in a separate collection
+        priority_update = {
+            'blocker_id': blocker_id,
+            'new_priority': new_priority,
+            'updated_by': request.user_email,
+            'updated_at': datetime.utcnow().isoformat(),
+            'company_id': request.company_id
+        }
+        
+        db.collection('blocker_updates').add(priority_update)
+        
+        return jsonify({'success': True, 'message': 'Priority updated'})
+        
+    except Exception as e:
+        print(f"Error updating blocker priority: {e}")
+        return jsonify({'success': False, 'error': 'Failed to update priority'}), 500
+
+@app.route('/api/blockers/<blocker_id>/analyze', methods=['POST'])
+@require_auth
+def analyze_blocker_with_ai():
+    """Analyze a specific blocker with AI"""
+    try:
+        blocker_id = request.view_args['blocker_id']
+        data = request.get_json()
+        context = data.get('context', '')
+        keyword = data.get('keyword', '')
+        
+        if not os.getenv('OPENAI_API_KEY'):
+            return jsonify({'error': 'AI analysis not available'}), 503
+        
+        from openai import OpenAI
+        client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        
+        prompt = f"""
+        Analyze this specific blocker and provide actionable insights:
+        
+        Blocker: "{keyword}"
+        Context: "{context}"
+        
+        Please provide:
+        1. A brief analysis of the blocker
+        2. 2-3 specific, actionable suggestions to resolve it
+        3. Estimated severity (high/medium/low)
+        4. Potential impact on the team
+        
+        Respond in JSON format:
+        {{
+            "analysis": "brief analysis",
+            "suggestions": ["suggestion1", "suggestion2"],
+            "severity": "medium",
+            "impact": "potential impact description"
+        }}
+        """
+        
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=300,
+            temperature=0.3
+        )
+        
+        ai_result = response.choices[0].message.content.strip()
+        
+        # Clean and parse response
+        if ai_result.startswith('```json'):
+            ai_result = ai_result[7:]
+        if ai_result.endswith('```'):
+            ai_result = ai_result[:-3]
+        
+        import json
+        analysis = json.loads(ai_result)
+        
+        # Store the analysis
+        ai_analysis_doc = {
+            'blocker_id': blocker_id,
+            'analysis': analysis,
+            'analyzed_by': 'ai',
+            'analyzed_at': datetime.utcnow().isoformat(),
+            'company_id': request.company_id
+        }
+        
+        db.collection('blocker_ai_analyses').add(ai_analysis_doc)
+        
+        return jsonify({
+            'success': True,
+            'analysis': analysis
+        })
+        
+    except Exception as e:
+        print(f"Error analyzing blocker with AI: {e}")
+        return jsonify({'success': False, 'error': 'Failed to analyze blocker'}), 500
+
+# Update the standup submission to use enhanced AI detection:
+# In your existing standup submission route, replace this line:
+# blocker_analysis = detect_blockers(blockers_text)
+# With:
+# blocker_analysis = detect_blockers_with_ai(blockers_text, use_ai=True)
 
 def analyze_sentiment(text):
     """Enhanced sentiment analysis with confidence scores"""

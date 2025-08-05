@@ -11,7 +11,8 @@ import {
   ShieldCheckIcon,
   ChatBubbleLeftRightIcon,
   ArrowTrendingUpIcon,
-  XMarkIcon
+  XMarkIcon,
+  SparklesIcon
 } from '@heroicons/react/24/outline';
 
 function BlockerManagement() {
@@ -25,6 +26,7 @@ function BlockerManagement() {
   const [selectedBlocker, setSelectedBlocker] = useState(null);
   const [showResolutionModal, setShowResolutionModal] = useState(false);
   const [isConnected, setIsConnected] = useState(true); // Default to connected
+  const [aiAnalyzing, setAiAnalyzing] = useState(null); // Track which blocker is being analyzed
 
   useEffect(() => {
     if (currentTeam?.id && currentCompany?.id) {
@@ -118,6 +120,55 @@ function BlockerManagement() {
     }
   };
 
+  const updateBlockerPriority = async (blockerId, newPriority) => {
+    try {
+      const token = await window.firebase.auth().currentUser?.getIdToken();
+      const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/blockers/${blockerId}/priority`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'X-Company-ID': currentCompany.id
+        },
+        body: JSON.stringify({ priority: newPriority })
+      });
+      
+      if (response.ok) {
+        await fetchBlockers();
+        await fetchBlockerAnalytics();
+      }
+    } catch (error) {
+      console.error('Error updating blocker priority:', error);
+    }
+  };
+
+  const analyzeWithAI = async (blocker) => {
+    setAiAnalyzing(blocker.id);
+    try {
+      const token = await window.firebase.auth().currentUser?.getIdToken();
+      const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/blockers/${blocker.id}/analyze`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'X-Company-ID': currentCompany.id
+        },
+        body: JSON.stringify({ 
+          context: blocker.context,
+          keyword: blocker.keyword 
+        })
+      });
+      
+      if (response.ok) {
+        await fetchBlockers(); // Refresh to show AI analysis
+      }
+    } catch (error) {
+      console.error('Error analyzing blocker with AI:', error);
+    } finally {
+      setAiAnalyzing(null);
+    }
+  };
+
   const handleResolutionSubmit = async (e) => {
     e.preventDefault();
     const formData = new FormData(e.target);
@@ -179,7 +230,7 @@ function BlockerManagement() {
               Team Blockers
             </h1>
             <p className="text-gray-600 mt-1">
-              AI-detected issues and team impediments
+              AI-powered blocker detection and management
             </p>
           </div>
           <div className="flex items-center space-x-2">
@@ -319,13 +370,23 @@ function BlockerManagement() {
                       }`}>
                         {blocker.status}
                       </span>
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                        blocker.severity === 'high' ? 'bg-red-100 text-red-800' :
-                        blocker.severity === 'medium' ? 'bg-yellow-100 text-yellow-800' :
-                        'bg-blue-100 text-blue-800'
-                      }`}>
-                        {blocker.severity} priority
-                      </span>
+                      
+                      {/* Priority Selector */}
+                      {blocker.status === 'active' && (
+                        <select
+                          value={blocker.severity}
+                          onChange={(e) => updateBlockerPriority(blocker.id, e.target.value)}
+                          className={`px-2 py-1 rounded text-xs font-medium border-0 cursor-pointer ${
+                            blocker.severity === 'high' ? 'bg-red-100 text-red-800' :
+                            blocker.severity === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                            'bg-blue-100 text-blue-800'
+                          }`}
+                        >
+                          <option value="high">High Priority</option>
+                          <option value="medium">Medium Priority</option>
+                          <option value="low">Low Priority</option>
+                        </select>
+                      )}
                     </div>
 
                     <div className="flex items-center space-x-4 text-sm text-gray-600 mb-3">
@@ -346,6 +407,24 @@ function BlockerManagement() {
                       </div>
                     )}
 
+                    {/* AI Analysis Display */}
+                    {blocker.ai_analysis && (
+                      <div className="bg-blue-50 rounded-lg p-3 mb-3">
+                        <p className="text-sm text-blue-800 font-medium mb-1">🤖 AI Analysis:</p>
+                        <p className="text-sm text-blue-700">{blocker.ai_analysis}</p>
+                        {blocker.ai_suggestions && blocker.ai_suggestions.length > 0 && (
+                          <div className="mt-2">
+                            <p className="text-xs text-blue-600 font-medium">Suggested actions:</p>
+                            <ul className="list-disc list-inside text-xs text-blue-600 mt-1">
+                              {blocker.ai_suggestions.map((suggestion, i) => (
+                                <li key={i}>{suggestion}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {blocker.resolution && (
                       <div className="bg-green-50 rounded-lg p-3 mb-3">
                         <p className="text-sm text-green-800 font-medium mb-1">Resolution:</p>
@@ -358,7 +437,7 @@ function BlockerManagement() {
                   </div>
 
                   {blocker.status === 'active' && (
-                    <div className="flex items-center space-x-2 ml-4">
+                    <div className="flex flex-col space-y-2 ml-4">
                       <button
                         onClick={() => {
                           setSelectedBlocker(blocker);
@@ -366,18 +445,27 @@ function BlockerManagement() {
                         }}
                         className="px-3 py-1 text-sm bg-green-100 text-green-700 rounded-md hover:bg-green-200 transition-colors"
                       >
-                        Resolve
+                        ✓ Mark Resolved
                       </button>
                       <button
                         onClick={() => escalateBlocker(blocker.id)}
                         className="px-3 py-1 text-sm bg-red-100 text-red-700 rounded-md hover:bg-red-200 transition-colors"
                       >
-                        Escalate
+                        ⚠ Escalate
                       </button>
                       <button
-                        className="px-3 py-1 text-sm bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200 transition-colors"
+                        onClick={() => analyzeWithAI(blocker)}
+                        disabled={aiAnalyzing === blocker.id}
+                        className="px-3 py-1 text-sm bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
                       >
-                        <ChatBubbleLeftRightIcon className="w-4 h-4" />
+                        {aiAnalyzing === blocker.id ? (
+                          <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-700"></div>
+                        ) : (
+                          <>
+                            <SparklesIcon className="w-3 h-3 mr-1" />
+                            AI Analyze
+                          </>
+                        )}
                       </button>
                     </div>
                   )}

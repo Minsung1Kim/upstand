@@ -7,6 +7,8 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useTeam } from '../context/TeamContext';
 import api from '../services/api';
+import { useNavigate } from 'react-router-dom';
+
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -50,6 +52,8 @@ function Dashboard() {
   const [dashboardData, setDashboardData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const navigate = useNavigate();
+
 
   useEffect(() => {
     console.log('Dashboard useEffect triggered', { currentTeam });
@@ -353,19 +357,40 @@ function Dashboard() {
       </div>
 
       {/* Active Blockers List */}
-      {dashboardData?.active_blockers && dashboardData.active_blockers.length > 0 && (
-        <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Active Blockers</h2>
-          <div className="space-y-3">
-            {dashboardData.active_blockers.map((blocker, index) => (
-              <div key={index} className="flex items-start space-x-3 p-3 bg-red-50 rounded-lg">
-                <ExclamationTriangleIcon className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-                <p className="text-sm text-gray-700">{blocker}</p>
-              </div>
-            ))}
+      {dashboardData?.blocker_analysis?.active_blockers && dashboardData.blocker_analysis.active_blockers.length > 0 && (
+  <div className="bg-white rounded-lg shadow p-6">
+    <div className="flex items-center justify-between mb-4">
+      <h2 className="text-lg font-semibold text-gray-900">Active Blockers</h2>
+      <button
+        onClick={() => navigate('/blockers')}
+        className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+      >
+        View All →
+      </button>
+    </div>
+    <div className="space-y-3">
+      {dashboardData.blocker_analysis.active_blockers.map((blocker, index) => (
+        <div 
+          key={index} 
+          className="flex items-start space-x-3 p-3 bg-red-50 rounded-lg cursor-pointer hover:bg-red-100 transition-colors"
+          onClick={() => navigate('/blockers')}
+        >
+          <ExclamationTriangleIcon className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-sm font-medium text-gray-900">{blocker.keyword || 'Blocker'}</p>
+            <p className="text-xs text-gray-600">{blocker.user} • {blocker.severity} priority</p>
+            <p className="text-xs text-gray-700 mt-1">{blocker.context}</p>
           </div>
         </div>
-      )}
+      ))}
+    </div>
+    {dashboardData.blocker_analysis.total_blockers > 5 && (
+      <p className="text-xs text-gray-500 mt-2 text-center">
+        +{dashboardData.blocker_analysis.total_blockers - 5} more blockers
+      </p>
+    )}
+  </div>
+)}
 
       {/* Recent Standups */}
       <div className="bg-white rounded-lg shadow p-6">
