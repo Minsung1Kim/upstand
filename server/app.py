@@ -207,7 +207,7 @@ def require_auth(f):
 # Add this enhanced detect_blockers function to your server/app.py
 # Replace the existing detect_blockers function with this:
 
-def detect_blockers_with_ai(text, use_ai=True):
+def detect_blockers(text, use_ai=True):
     """Enhanced blocker detection with both keyword matching and AI analysis"""
     if not text:
         return {'has_blockers': False, 'blockers': [], 'severity': 'none', 'blocker_count': 0}
