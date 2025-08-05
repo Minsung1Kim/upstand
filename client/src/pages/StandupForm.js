@@ -145,7 +145,6 @@ function StandupForm() {
             Standup submitted successfully!
           </div>
 
-          // Replace the Blocker Analysis section in StandupForm.js with this enhanced version:
 
       {/* Enhanced Blocker Analysis */}
       {response.blocker_analysis && response.blocker_analysis.has_blockers && (
@@ -243,23 +242,23 @@ function StandupForm() {
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-sm text-gray-600">Sentiment</span>
                   <span className={`text-sm font-medium ${
-                    response.sentiment?.sentiment === 'positive' ? 'text-green-600' :
-                    response.sentiment?.sentiment === 'negative' ? 'text-red-600' :
+                    response.blocker_analysis?.sentiment === 'positive' ? 'text-green-600' :
+                    response.blocker_analysis?.sentiment === 'negative' ? 'text-red-600' :
                     'text-yellow-600'
                   }`}>
-                    {response.sentiment?.sentiment || 'neutral'}
+                    {response.blocker_analysis?.sentiment || 'neutral'}
                   </span>
                 </div>
                 <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div 
-                    className={`h-2 rounded-full ${
-                      response.sentiment?.sentiment === 'positive' ? 'bg-green-500' :
-                      response.sentiment?.sentiment === 'negative' ? 'bg-red-500' :
-                      'bg-yellow-500'
-                    }`}
-                    style={{ width: `${((response.sentiment?.score || 0) + 1) * 50}%` }}
-                  />
-                </div>
+                <div 
+                  className={`h-2 rounded-full ${
+                    response.blocker_analysis?.sentiment === 'positive' ? 'bg-green-500' :
+                    response.blocker_analysis?.sentiment === 'negative' ? 'bg-red-500' :
+                    'bg-yellow-500'
+                  }`}
+                  style={{ width: `${((response.blocker_analysis?.sentiment_score ?? 0) + 1) * 50}%` }}
+                />
+              </div>
               </div>
             </div>
           </div>

@@ -207,6 +207,14 @@ def require_auth(f):
 # Add this enhanced detect_blockers function to your server/app.py
 # Replace the existing detect_blockers function with this:
 
+def sentiment_to_score(sentiment):
+    if sentiment == 'positive':
+        return 1
+    elif sentiment == 'negative':
+        return -1
+    else:
+        return 0
+
 def detect_blockers_keyword(text):
     """Basic keyword-based blocker detection (no recursion)"""
     keywords = ['blocker', 'stuck', 'impediment', 'issue', 'problem', 'delay', 'blocked']
@@ -306,7 +314,8 @@ def detect_blockers(text, use_ai=True):
             'severity': ai_analysis.get('overall_severity', keyword_result.get('severity', 'none')),
             'blocker_count': len(enhanced_blockers),
             'ai_analysis': ai_analysis.get('analysis', ''),
-            'sentiment': ai_analysis.get('sentiment', 'neutral')
+            'sentiment': ai_analysis.get('sentiment', 'neutral'),
+            'sentiment_score': sentiment_to_score(ai_analysis.get('sentiment', 'neutral'))
         }
         
     except Exception as e:
