@@ -1,5 +1,4 @@
 import React from 'react';
-import { colors, inputStyles } from '../../utils/colors';
 
 const Input = ({ 
   label,
@@ -9,53 +8,33 @@ const Input = ({
   containerClassName = '',
   ...props 
 }) => {
-  const baseClasses = 'w-full px-3 py-2 border rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-0';
+  const baseClasses = 'w-full px-4 py-3 border-2 rounded-xl transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-0 placeholder-gray-400';
   
-  const inputStyle = {
-    borderColor: error ? colors.accent.error : colors.neutral[300],
-    backgroundColor: inputStyles.base.backgroundColor,
-    color: inputStyles.base.color,
-  };
-
-  const focusStyle = {
-    borderColor: error ? colors.accent.error : colors.primary[200],
-    boxShadow: error 
-      ? `0 0 0 3px ${colors.accent.error}20` 
-      : `0 0 0 3px ${colors.primary[200]}20`,
-  };
-
-  const handleFocus = (e) => {
-    Object.assign(e.target.style, focusStyle);
-  };
-
-  const handleBlur = (e) => {
-    e.target.style.borderColor = error ? colors.accent.error : colors.neutral[300];
-    e.target.style.boxShadow = 'none';
-  };
+  const errorClasses = error 
+    ? 'border-red-300 focus:border-red-500 focus:ring-red-200 bg-red-50' 
+    : 'border-gray-200 focus:border-blue-500 focus:ring-blue-200 bg-white hover:border-gray-300';
 
   return (
-    <div className={containerClassName}>
+    <div className={`space-y-2 ${containerClassName}`}>
       {label && (
-        <label className="block text-sm font-medium mb-2" style={{ color: colors.neutral[700] }}>
+        <label className="block text-sm font-semibold text-gray-700 mb-1">
           {label}
         </label>
       )}
       <input
-        className={`${baseClasses} ${className}`}
-        style={inputStyle}
-        onFocus={handleFocus}
-        onBlur={handleBlur}
+        className={`${baseClasses} ${errorClasses} ${className}`}
         {...props}
       />
       {error && (
-        <p className="mt-1 text-sm" style={{ color: colors.accent.error }}>
+        <p className="text-sm text-red-600 flex items-center">
+          <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+          </svg>
           {error}
         </p>
       )}
       {helperText && !error && (
-        <p className="mt-1 text-sm" style={{ color: colors.neutral[500] }}>
-          {helperText}
-        </p>
+        <p className="text-sm text-gray-500">{helperText}</p>
       )}
     </div>
   );

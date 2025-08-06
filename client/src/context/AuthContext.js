@@ -16,6 +16,19 @@ import { auth, googleProvider } from '../firebase';
 
 const AuthContext = createContext({});
 
+// Demo mode flag - can be set via environment variable
+const DEMO_MODE = process.env.REACT_APP_DEMO_MODE === 'true' || !process.env.REACT_APP_FIREBASE_API_KEY;
+
+// Demo user for testing
+const DEMO_USER = {
+  uid: 'demo-user-123',
+  email: 'demo@upstand.dev',
+  displayName: 'Demo User',
+  photoURL: null
+};
+
+console.log('Auth Context - Demo Mode:', DEMO_MODE); // Use DEMO_MODE to avoid warning
+
 export function useAuth() {
   return useContext(AuthContext);
 }
@@ -82,6 +95,16 @@ export function AuthProvider({ children }) {
   async function login(email, password) {
     try {
       setError('');
+      
+      if (DEMO_MODE) {
+        // Demo mode - accept any credentials but prefer demo credentials
+        setLoading(true);
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate loading
+        setCurrentUser(DEMO_USER);
+        setLoading(false);
+        return { user: DEMO_USER };
+      }
+      
       const result = await signInWithEmailAndPassword(auth, email, password);
       return result;
     } catch (error) {
@@ -95,6 +118,15 @@ export function AuthProvider({ children }) {
     try {
       setError('');
       console.log('Attempting Google sign-in...');
+      
+      if (DEMO_MODE) {
+        // Demo mode - simulate Google login
+        setLoading(true);
+        await new Promise(resolve => setTimeout(resolve, 1500)); // Simulate loading
+        setCurrentUser({...DEMO_USER, displayName: 'Demo User (Google)'});
+        setLoading(false);
+        return { user: {...DEMO_USER, displayName: 'Demo User (Google)'} };
+      }
       
       // Check if Firebase is properly configured
       if (!auth || !googleProvider) {
@@ -148,6 +180,12 @@ export function AuthProvider({ children }) {
   async function logout() {
     try {
       setError('');
+      
+      if (DEMO_MODE) {
+        setCurrentUser(null);
+        return;
+      }
+      
       await signOut(auth);
     } catch (error) {
       setError(error.message);
@@ -235,6 +273,16 @@ export function AuthProvider({ children }) {
   }
 
   useEffect(() => {
+    if (DEMO_MODE) {
+      // In demo mode, automatically sign in after a short delay
+      const timer = setTimeout(() => {
+        setCurrentUser(DEMO_USER);
+        setLoading(false);
+      }, 1000);
+      
+      return () => clearTimeout(timer);
+    }
+    
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
       setLoading(false);

@@ -1,5 +1,4 @@
 import React from 'react';
-import { colors, buttonStyles } from '../../utils/colors';
 
 const Button = ({ 
   children, 
@@ -13,27 +12,14 @@ const Button = ({
   ...props 
 }) => {
   const variants = {
-    primary: buttonStyles.primary,
-    secondary: buttonStyles.secondary,
-    accent: buttonStyles.accent,
-    success: buttonStyles.success,
-    warning: buttonStyles.warning,
-    error: buttonStyles.error,
-    outline: {
-      backgroundColor: 'transparent',
-      color: colors.secondary[500],
-      border: `1px solid ${colors.secondary[500]}`,
-      hover: {
-        backgroundColor: colors.secondary[50],
-      }
-    },
-    ghost: {
-      backgroundColor: 'transparent',
-      color: colors.secondary[500],
-      hover: {
-        backgroundColor: colors.secondary[50],
-      }
-    }
+    primary: 'bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white shadow-lg hover:shadow-xl transform hover:scale-105 focus:ring-blue-500',
+    secondary: 'bg-gray-100 hover:bg-gray-200 text-gray-800 border border-gray-300 focus:ring-gray-500',
+    accent: 'bg-gradient-to-r from-green-500 to-teal-600 hover:from-green-600 hover:to-teal-700 text-white shadow-lg hover:shadow-xl transform hover:scale-105 focus:ring-green-500',
+    success: 'bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 text-white shadow-lg hover:shadow-xl transform hover:scale-105 focus:ring-emerald-500',
+    warning: 'bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 text-white shadow-lg hover:shadow-xl transform hover:scale-105 focus:ring-yellow-500',
+    error: 'bg-gradient-to-r from-red-500 to-pink-600 hover:from-red-600 hover:to-pink-700 text-white shadow-lg hover:shadow-xl transform hover:scale-105 focus:ring-red-500',
+    outline: 'bg-transparent hover:bg-gray-50 text-gray-700 border-2 border-gray-300 hover:border-gray-400 transition-all duration-200 focus:ring-gray-500',
+    ghost: 'bg-transparent hover:bg-gray-100 text-gray-600 hover:text-gray-800 transition-all duration-200 focus:ring-gray-500'
   };
 
   const sizes = {
@@ -43,52 +29,23 @@ const Button = ({
     xl: 'px-8 py-4 text-lg'
   };
 
-  const baseClasses = 'font-medium rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed';
+  const baseClasses = 'font-medium rounded-xl transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none';
   
-  const variantStyle = variants[variant] || variants.primary;
+  const variantClasses = variants[variant] || variants.primary;
   const sizeClasses = sizes[size];
-
-  const buttonStyle = {
-    backgroundColor: variantStyle.backgroundColor,
-    color: variantStyle.color,
-    border: variantStyle.border || 'none',
-    ...props.style
-  };
-
-  const handleMouseEnter = (e) => {
-    if (!disabled && !loading && variantStyle.hover) {
-      Object.assign(e.target.style, variantStyle.hover);
-    }
-  };
-
-  const handleMouseLeave = (e) => {
-    if (!disabled && !loading) {
-      e.target.style.backgroundColor = variantStyle.backgroundColor;
-      e.target.style.color = variantStyle.color;
-      if (variantStyle.border) {
-        e.target.style.border = variantStyle.border;
-      }
-    }
-  };
 
   return (
     <button
       type={type}
-      className={`${baseClasses} ${sizeClasses} ${className}`}
-      style={buttonStyle}
+      className={`${baseClasses} ${variantClasses} ${sizeClasses} ${className}`}
       disabled={disabled || loading}
       onClick={onClick}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
       {...props}
     >
       {loading ? (
         <div className="flex items-center justify-center">
-          <div 
-            className="animate-spin rounded-full h-4 w-4 border-b-2 mr-2"
-            style={{ borderBottomColor: 'currentColor' }}
-          ></div>
-          Loading...
+          <div className="animate-spin rounded-full h-4 w-4 border-2 border-current border-t-transparent mr-2"></div>
+          <span>Loading...</span>
         </div>
       ) : (
         children

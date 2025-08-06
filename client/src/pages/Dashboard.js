@@ -7,6 +7,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useTeam } from '../context/TeamContext';
 import api from '../services/api';
 import { useNavigate } from 'react-router-dom';
+import { PageLoader } from '../components/ui/LoadingSpinner';
 
 import {
   Chart as ChartJS,
@@ -119,11 +120,11 @@ function Dashboard() {
   const getSentimentIcon = (sentiment) => {
     switch (sentiment) {
       case 'positive':
-        return <FaceSmileIcon className="w-8 h-8 text-green-500" />;
+        return <FaceSmileIcon className="w-6 h-6 text-white" />;
       case 'negative':
-        return <FaceFrownIcon className="w-8 h-8 text-red-500" />;
+        return <FaceFrownIcon className="w-6 h-6 text-white" />;
       default:
-        return <FaceSmileIcon className="w-8 h-8 text-yellow-500" />;
+        return <FaceSmileIcon className="w-6 h-6 text-white" />;
     }
   };
 
@@ -186,26 +187,21 @@ function Dashboard() {
   }
 
   if (loading) {
-    return (
-      <div className="max-w-7xl mx-auto p-6">
-        <div className="flex items-center justify-center h-64">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-          <p className="ml-4 text-gray-600">Loading dashboard...</p>
-        </div>
-      </div>
-    );
+    return <PageLoader message="Loading your dashboard..." />;
   }
 
   if (error && !dashboardData) {
     return (
       <div className="max-w-7xl mx-auto p-6">
-        <div className="text-center py-12">
-          <ExclamationTriangleIcon className="w-16 h-16 text-red-400 mx-auto mb-4" />
-          <h1 className="text-2xl font-bold text-gray-900 mb-4">Dashboard Error</h1>
-          <p className="text-gray-600 mb-6">{error}</p>
+        <div className="bg-white rounded-2xl shadow-xl p-12 text-center">
+          <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-6">
+            <ExclamationTriangleIcon className="w-10 h-10 text-red-500" />
+          </div>
+          <h1 className="text-3xl font-bold text-gray-900 mb-4">Dashboard Error</h1>
+          <p className="text-gray-600 mb-8 max-w-md mx-auto">{error}</p>
           <button 
             onClick={() => fetchDashboardData()} 
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+            className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-8 py-3 rounded-xl hover:from-blue-600 hover:to-purple-700 transform transition-all duration-200 hover:scale-105 shadow-lg font-semibold"
           >
             Try Again
           </button>
@@ -215,70 +211,82 @@ function Dashboard() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto p-6">
-      {/* Header */}
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Team Dashboard</h1>
-        <p className="text-gray-600">Track your team's progress and performance</p>
-      </div>
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100">
+      <div className="max-w-7xl mx-auto p-6">
+        {/* Header */}
+        <div className="mb-8">
+          <h1 className="text-4xl font-bold text-gray-900 mb-2">Team Dashboard</h1>
+          <p className="text-lg text-gray-600">Track your team's progress and performance</p>
+        </div>
 
-      {/* Quick Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-        {/* Today's Standups */}
-        <div className="bg-white rounded-lg shadow p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-600">Today's Standups</p>
-              <p className="text-2xl font-semibold text-gray-900">
-                {dashboardData?.standup_count || 0}
-              </p>
+        {/* Quick Stats */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">{/* Today's Standups */}
+          <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-xl p-6 border border-white/20 transform transition-all duration-300 hover:scale-105 hover:shadow-2xl">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Today's Standups</p>
+                <p className="text-3xl font-bold text-gray-900 mt-2">
+                  {dashboardData?.standup_count || 0}
+                </p>
+                <p className="text-sm text-green-600 mt-1">+12% from yesterday</p>
+              </div>
+              <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-blue-600 rounded-xl flex items-center justify-center">
+                <UserGroupIcon className="w-6 h-6 text-white" />
+              </div>
             </div>
-            <UserGroupIcon className="w-8 h-8 text-blue-500" />
+          </div>
+
+          {/* Active Sprint */}
+          <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-xl p-6 border border-white/20 transform transition-all duration-300 hover:scale-105 hover:shadow-2xl">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Active Sprint</p>
+                <p className="text-lg font-bold text-gray-900 mt-2 truncate">
+                  {dashboardData?.active_sprint?.name || 'No active sprint'}
+                </p>
+                <p className="text-sm text-blue-600 mt-1">5 days remaining</p>
+              </div>
+              <div className="w-12 h-12 bg-gradient-to-r from-green-500 to-green-600 rounded-xl flex items-center justify-center">
+                <CalendarIcon className="w-6 h-6 text-white" />
+              </div>
+            </div>
+          </div>
+
+          {/* Active Blockers */}
+          <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-xl p-6 border border-white/20 transform transition-all duration-300 hover:scale-105 hover:shadow-2xl">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Active Blockers</p>
+                <p className="text-3xl font-bold text-red-600 mt-2">
+                  {dashboardData?.active_blockers?.length || 0}
+                </p>
+                <p className="text-sm text-red-500 mt-1">Needs attention</p>
+              </div>
+              <div className="w-12 h-12 bg-gradient-to-r from-red-500 to-red-600 rounded-xl flex items-center justify-center">
+                <ExclamationTriangleIcon className="w-6 h-6 text-white" />
+              </div>
+            </div>
+          </div>
+
+          {/* Team Sentiment */}
+          <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-xl p-6 border border-white/20 transform transition-all duration-300 hover:scale-105 hover:shadow-2xl">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Team Sentiment</p>
+                <p className={`text-lg font-bold mt-2 px-3 py-1 rounded-full inline-block ${getSentimentColor(dashboardData?.sentiment_label)}`}>
+                  {dashboardData?.sentiment_label || 'Neutral'}
+                </p>
+                <p className="text-sm text-gray-500 mt-1">Based on standups</p>
+              </div>
+              <div className="w-12 h-12 bg-gradient-to-r from-yellow-500 to-orange-500 rounded-xl flex items-center justify-center">
+                {getSentimentIcon(dashboardData?.sentiment_label)}
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Active Sprint */}
-        <div className="bg-white rounded-lg shadow p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-600">Active Sprint</p>
-              <p className="text-sm font-bold text-gray-900">
-                {dashboardData?.active_sprint?.name || 'No active sprint'}
-              </p>
-            </div>
-            <CalendarIcon className="w-8 h-8 text-green-500" />
-          </div>
-        </div>
-
-        {/* Active Blockers */}
-        <div className="bg-white rounded-lg shadow p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-600">Active Blockers</p>
-              <p className="text-2xl font-semibold text-red-600">
-                {dashboardData?.active_blockers?.length || 0}
-              </p>
-            </div>
-            <ExclamationTriangleIcon className="w-8 h-8 text-red-500" />
-          </div>
-        </div>
-
-        {/* Team Sentiment */}
-        <div className="bg-white rounded-lg shadow p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-600">Team Sentiment</p>
-              <p className={`text-lg font-semibold ${getSentimentColor(dashboardData?.sentiment_label)} px-3 py-1 rounded-full inline-block`}>
-                {dashboardData?.sentiment_label || 'Neutral'}
-              </p>
-            </div>
-            {getSentimentIcon(dashboardData?.sentiment_label)}
-          </div>
-        </div>
-      </div>
-
-      {/* Main Content Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Main Content Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {/* Today's Summary */}
         <div className="bg-white rounded-lg shadow p-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Today's Team Summary</h2>
