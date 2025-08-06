@@ -1,26 +1,21 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useTeam } from '../context/TeamContext';
-import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
 import {
   CalendarIcon,
   FlagIcon,
-  CheckCircleIcon,
-  XCircleIcon,
   PencilIcon,
   TrashIcon,
   ClockIcon,
   ChartBarIcon,
   PlayIcon,
-  PauseIcon,
   CheckIcon,
-  PlusIcon,
-  ExclamationTriangleIcon
+  PlusIcon
 } from '@heroicons/react/24/outline';
 
 function SprintManagement() {
   const { currentTeam } = useTeam();
-  const { currentUser } = useAuth();
+  // const { currentUser } = useAuth(); // Removed unused variable
   const [sprints, setSprints] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('active'); // 'active', 'planning', 'completed'
@@ -28,16 +23,7 @@ function SprintManagement() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingData, setEditingData] = useState(null);
 
-  useEffect(() => {
-    if (currentTeam?.id) {
-      fetchSprints();
-    } else {
-      setLoading(false);
-      setSprints([]);
-    }
-  }, [currentTeam?.id]);
-
-  const fetchSprints = async () => {
+  const fetchSprints = useCallback(async () => {
     try {
       setLoading(true);
       const response = await api.get(`/sprints?team_id=${currentTeam.id}`);
@@ -58,7 +44,16 @@ function SprintManagement() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentTeam.id, selectedSprint]);
+
+  useEffect(() => {
+    if (currentTeam?.id) {
+      fetchSprints();
+    } else {
+      setLoading(false);
+      setSprints([]);
+    }
+  }, [currentTeam?.id, fetchSprints]);
 
   const handleDeleteSprint = async (sprintId) => {
     if (!window.confirm('Are you sure you want to delete this sprint? This action cannot be undone.')) {

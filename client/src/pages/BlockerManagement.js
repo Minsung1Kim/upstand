@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useTeam } from '../context/TeamContext';
 import { useCompany } from '../context/CompanyContext';
 import { 
@@ -6,10 +6,8 @@ import {
   CheckCircleIcon, 
   ClockIcon, 
   UserIcon,
-  ChartBarIcon,
   FireIcon,
   ShieldCheckIcon,
-  ChatBubbleLeftRightIcon,
   ArrowTrendingUpIcon,
   XMarkIcon,
   SparklesIcon
@@ -25,17 +23,10 @@ function BlockerManagement() {
   const [filter, setFilter] = useState('all'); // all, active, resolved, high, medium, low
   const [selectedBlocker, setSelectedBlocker] = useState(null);
   const [showResolutionModal, setShowResolutionModal] = useState(false);
-  const [isConnected, setIsConnected] = useState(true); // Default to connected
+  const [isConnected] = useState(true); // Simple connected state for demo
   const [aiAnalyzing, setAiAnalyzing] = useState(null); // Track which blocker is being analyzed
 
-  useEffect(() => {
-    if (currentTeam?.id && currentCompany?.id) {
-      fetchBlockers();
-      fetchBlockerAnalytics();
-    }
-  }, [currentTeam?.id, currentCompany?.id]);
-
-  const fetchBlockers = async () => {
+  const fetchBlockers = useCallback(async () => {
     try {
       const token = await window.firebase.auth().currentUser?.getIdToken();
       const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/blockers/active?team_id=${currentTeam.id}`, {
@@ -52,9 +43,9 @@ function BlockerManagement() {
     } catch (error) {
       console.error('Error fetching blockers:', error);
     }
-  };
+  }, [currentTeam.id, currentCompany.id]);
 
-  const fetchBlockerAnalytics = async () => {
+  const fetchBlockerAnalytics = useCallback(async () => {
     try {
       const token = await window.firebase.auth().currentUser?.getIdToken();
       const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/analytics/blocker-summary?team_id=${currentTeam.id}`, {
@@ -73,7 +64,14 @@ function BlockerManagement() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentTeam.id, currentCompany.id]);
+
+  useEffect(() => {
+    if (currentTeam?.id && currentCompany?.id) {
+      fetchBlockers();
+      fetchBlockerAnalytics();
+    }
+  }, [currentTeam?.id, currentCompany?.id, fetchBlockers, fetchBlockerAnalytics]);
 
   const resolveBlocker = async (blockerId, resolution) => {
     try {

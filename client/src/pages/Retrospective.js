@@ -3,7 +3,7 @@
  * Collects anonymous feedback and displays AI analysis
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useTeam } from '../context/TeamContext';
 import api from '../services/api';
 import { 
@@ -21,7 +21,7 @@ function Retrospective() {
   const [anonymous, setAnonymous] = useState(true);
   const [loading, setLoading] = useState(false);
   const [analysis, setAnalysis] = useState(null);
-  const [sprintId, setSprintId] = useState('current'); // In production, fetch from active sprint
+  const sprintId = 'current'; // Simple sprint ID for demo
 
   const categories = [
     { id: 'went_well', label: 'What went well?', icon: HandThumbUpIcon, color: 'green' },

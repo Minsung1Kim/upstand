@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useTeam } from '../context/TeamContext';
 import { useAuth } from '../context/AuthContext';
 import { useCompany } from '../context/CompanyContext';
@@ -13,7 +13,7 @@ const ROLES = {
 };
 
 function TeamSettings() {
-  const { teams, currentTeam, setCurrentTeam, createTeam, refreshTeams } = useTeam();
+  const { teams, currentTeam, setCurrentTeam, refreshTeams } = useTeam();
   const { currentUser, getUserRole } = useAuth();
   const { currentCompany } = useCompany();
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -29,11 +29,7 @@ function TeamSettings() {
   const userRole = getUserRole();
   const isManager = userRole === 'MANAGER' || userRole === 'OWNER' || userRole === 'MEMBER';
 
-  useEffect(() => {
-    fetchAvailableTeams();
-  }, [teams]);
-
-  const fetchAvailableTeams = async () => {
+  const fetchAvailableTeams = useCallback(async () => {
     try {
       setLoadingAvailable(true);
       
@@ -53,7 +49,11 @@ function TeamSettings() {
     } finally {
       setLoadingAvailable(false);
     }
-  };
+  }, [teams]);
+
+  useEffect(() => {
+    fetchAvailableTeams();
+  }, [teams, fetchAvailableTeams]);
 
   const getLocalTeams = () => {
     try {

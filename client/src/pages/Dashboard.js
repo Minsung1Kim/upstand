@@ -3,8 +3,7 @@
  * Shows standup summary, sprint progress, blockers, and team sentiment
  */
 
-import React, { useState, useEffect } from 'react';
-import { useAuth } from '../context/AuthContext';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useTeam } from '../context/TeamContext';
 import api from '../services/api';
 import { useNavigate } from 'react-router-dom';
@@ -26,10 +25,8 @@ import {
   CalendarIcon, 
   UserGroupIcon, 
   ExclamationTriangleIcon,
-  ChartBarIcon,
   FaceSmileIcon,
   FaceFrownIcon,
-  CheckCircleIcon,
   UserIcon  // Added UserIcon import here
 } from '@heroicons/react/24/outline';
 
@@ -47,54 +44,14 @@ ChartJS.register(
 );
 
 function Dashboard() {
-  const { currentUser } = useAuth();
+  // const { currentUser } = useAuth(); // Removed unused variable
   const { currentTeam } = useTeam();
   const [dashboardData, setDashboardData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const navigate = useNavigate();
 
-
-  useEffect(() => {
-    console.log('Dashboard useEffect triggered', { currentTeam });
-    
-    if (currentTeam?.id) {
-      fetchDashboardData();
-      // Refresh data every 5 minutes
-      const interval = setInterval(fetchDashboardData, 5 * 60 * 1000);
-      return () => clearInterval(interval);
-    } else {
-      // If no team is selected, set loading to false and show appropriate message
-      setLoading(false);
-      setError('No team selected. Please select a team to view dashboard.');
-    }
-  }, [currentTeam?.id]); // More specific dependency
-
-  // Add effect to refresh when navigating back to dashboard
-  useEffect(() => {
-    const handleFocus = () => {
-      if (currentTeam?.id) {
-        fetchDashboardData();
-      }
-    };
-    
-    window.addEventListener('focus', handleFocus);
-    return () => window.removeEventListener('focus', handleFocus);
-  }, [currentTeam?.id]);
-
-  // Refresh data when component becomes visible again
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (!document.hidden && currentTeam?.id) {
-        fetchDashboardData();
-      }
-    };
-    
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [currentTeam?.id]);
-
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = useCallback(async () => {
     try {
       console.log('Fetching dashboard data for team:', currentTeam?.id);
       setLoading(true);
@@ -118,7 +75,46 @@ function Dashboard() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentTeam?.id]);
+
+  useEffect(() => {
+    console.log('Dashboard useEffect triggered', { currentTeam });
+    
+    if (currentTeam?.id) {
+      fetchDashboardData();
+      // Refresh data every 5 minutes
+      const interval = setInterval(fetchDashboardData, 5 * 60 * 1000);
+      return () => clearInterval(interval);
+    } else {
+      // If no team is selected, set loading to false and show appropriate message
+      setLoading(false);
+      setError('No team selected. Please select a team to view dashboard.');
+    }
+  }, [currentTeam, fetchDashboardData]); // More specific dependency
+
+  // Add effect to refresh when navigating back to dashboard
+  useEffect(() => {
+    const handleFocus = () => {
+      if (currentTeam?.id) {
+        fetchDashboardData();
+      }
+    };
+    
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [currentTeam?.id, fetchDashboardData]);
+
+  // Refresh data when component becomes visible again
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden && currentTeam?.id) {
+        fetchDashboardData();
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [currentTeam?.id, fetchDashboardData]);
 
   const getSentimentIcon = (sentiment) => {
     switch (sentiment) {

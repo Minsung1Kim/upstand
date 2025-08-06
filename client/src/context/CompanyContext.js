@@ -1,5 +1,5 @@
 // src/context/CompanyContext.js - Updated
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useAuth } from './AuthContext';
 
 const CompanyContext = createContext();
@@ -11,17 +11,7 @@ export const CompanyProvider = ({ children }) => {
   const [currentCompany, setCurrentCompany] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (currentUser) {
-      loadUserCompanies();
-    } else {
-      setUserCompanies([]);
-      setCurrentCompany(null);
-      setLoading(false);
-    }
-  }, [currentUser]);
-
-  const loadUserCompanies = async () => {
+  const loadUserCompanies = useCallback(async () => {
     try {
       const userCompaniesKey = `user_companies_${currentUser.uid}`;
       const stored = localStorage.getItem(userCompaniesKey);
@@ -40,7 +30,17 @@ export const CompanyProvider = ({ children }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (currentUser) {
+      loadUserCompanies();
+    } else {
+      setUserCompanies([]);
+      setCurrentCompany(null);
+      setLoading(false);
+    }
+  }, [currentUser, loadUserCompanies]);
 
   const switchCompany = (company) => {
     setCurrentCompany(company);

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useTeam } from '../context/TeamContext';
 import api from '../services/api';
 import { 
@@ -15,13 +15,7 @@ function Analytics() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    if (currentTeam) {
-      fetchAnalytics();
-    }
-  }, [currentTeam]);
-
-  const fetchAnalytics = async () => {
+  const fetchAnalytics = useCallback(async () => {
     try {
       setLoading(true);
       const response = await api.get(`/analytics/dashboard?team_id=${currentTeam.id}`);
@@ -34,7 +28,13 @@ function Analytics() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentTeam]);
+
+  useEffect(() => {
+    if (currentTeam) {
+      fetchAnalytics();
+    }
+  }, [currentTeam, fetchAnalytics]);
 
   if (!currentTeam) {
     return (
