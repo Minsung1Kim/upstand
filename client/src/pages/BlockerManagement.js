@@ -35,6 +35,12 @@ function BlockerManagement() {
   const [isConnected, setIsConnected] = useState(true); // Default to connected
   const [aiAnalyzing, setAiAnalyzing] = useState(null); // Track which blocker is being analyzed
 
+  // Stats-only KPIs for the cards
+  const activeCount = (stats?.active_total ?? stats?.active ?? 0);
+  const highCount = (stats?.high_total ?? stats?.by_priority?.high ?? 0);
+  const resolvedThisMonth = (stats?.resolved_month ?? 0);
+  const blockerRate = (stats?.blocker_rate ?? 0);
+
   useEffect(() => {
     if (currentTeam?.id && currentCompany?.id) {
       loadStats();
@@ -125,8 +131,7 @@ function BlockerManagement() {
       });
       
       if (response.ok) {
-        await loadStats();
-        await loadList();
+        await Promise.all([loadStats(), loadList()]);
         await fetchBlockerAnalytics();
       }
     } catch (error) {
@@ -235,9 +240,7 @@ function BlockerManagement() {
               <ExclamationTriangleIcon className="w-8 h-8 text-red-600" />
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-500">Active Blockers</p>
-                <p className="text-2xl font-bold text-gray-900">
-                  {items.filter(b => b.status === 'active').length}
-                </p>
+                <p className="text-2xl font-bold text-gray-900">{activeCount}</p>
               </div>
             </div>
           </div>
@@ -247,9 +250,7 @@ function BlockerManagement() {
               <FireIcon className="w-8 h-8 text-orange-600" />
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-500">High Severity</p>
-                <p className="text-2xl font-bold text-gray-900">
-                  {analytics.blocker_severity_counts?.high || 0}
-                </p>
+                <p className="text-2xl font-bold text-gray-900">{highCount}</p>
               </div>
             </div>
           </div>
@@ -259,9 +260,7 @@ function BlockerManagement() {
               <ArrowTrendingUpIcon className="w-8 h-8 text-blue-600" />
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-500">Blocker Rate</p>
-                <p className="text-2xl font-bold text-gray-900">
-                  {analytics.blocker_percentage || 0}%
-                </p>
+                <p className="text-2xl font-bold text-gray-900">{Math.round(blockerRate)}%</p>
                 <p className="text-xs text-gray-500">of standups</p>
               </div>
             </div>
@@ -272,9 +271,7 @@ function BlockerManagement() {
               <CheckCircleIcon className="w-8 h-8 text-green-600" />
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-500">Resolved</p>
-                <p className="text-2xl font-bold text-gray-900">
-                  {items.filter(b => b.status === 'resolved').length}
-                </p>
+                <p className="text-2xl font-bold text-gray-900">{resolvedThisMonth}</p>
                 <p className="text-xs text-gray-500">this month</p>
               </div>
             </div>
