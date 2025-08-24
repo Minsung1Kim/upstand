@@ -4,7 +4,7 @@ import time
 import threading
 import traceback
 import statistics
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from collections import defaultdict, Counter
 
@@ -322,6 +322,26 @@ def detect_blockers(text, use_ai=True):
         print(f"Error in AI blocker detection: {e}")
         # Fall back to keyword detection
         return keyword_result
+
+# ===== Blocker helper utilities =====
+def _now_ts():
+    return datetime.now(timezone.utc)
+
+def _blocker_doc(team_id, user_id, user_email, text, severity="medium"):
+    text = (text or "").strip()
+    if not text:
+        return None
+    return {
+        "team_id": team_id,
+        "user_id": user_id,
+        "user_email": user_email,
+        "keyword": text[:120],
+        "context": text,
+        "severity": severity,
+        "status": "active",
+        "created_at": _now_ts(),
+        "resolved_at": None,
+    }
 
 # Add new API endpoints for enhanced blocker management:
 
@@ -945,32 +965,31 @@ def submit_standup():
         user_id = request.user_id
         user_email = request.user_email
         company_id = request.company_id
-        
-        data = request.get_json()
+
+        data = request.get_json() or {}
         team_id = data.get('team_id')
-        
         if not team_id:
             return jsonify({'error': 'team_id is required'}), 400
-        
+
         track_user_action('submit_standup', {'team_id': team_id}, team_id)
-        
+
         # Verify team belongs to current company
         team_ref = db.collection('teams').document(team_id)
         team_doc = team_ref.get()
         if not team_doc.exists or team_doc.to_dict().get('company_id') != company_id:
             return jsonify({'error': 'Team not found or access denied'}), 403
-        
+
         today = datetime.utcnow().strftime('%Y-%m-%d')
-        
-        # Enhanced AI analysis
-        yesterday_text = data.get('yesterday', '')
-        today_text = data.get('today', '')
-        blockers_text = data.get('blockers', '')
-        
+
+        # Collect fields
+        yesterday_text = data.get('yesterday', '') or ''
+        today_text = data.get('today', '') or ''
+        blockers_text = data.get('blockers', '') or ''
+
         # Analyze text for insights
         blocker_analysis = detect_blockers(blockers_text)
         sentiment_analysis = analyze_sentiment(f"{yesterday_text} {today_text}")
-        
+
         standup_data = {
             'user_id': user_id,
             'user_email': user_email,
@@ -982,19 +1001,18 @@ def submit_standup():
             'today': today_text,
             'blockers': blockers_text,
             'blocker_analysis': blocker_analysis,
-            'mood': data.get('mood', 5), 
+            'mood': data.get('mood', 5),
             'sentiment_analysis': sentiment_analysis,
-            'created_at': datetime.utcnow().isoformat()
+            'created_at': datetime.utcnow().isoformat(),
         }
-        
+
         # Save to Firestore
         db.collection('standups').add(standup_data)
 
         # Create first-class Blocker docs when blockers text is present
         try:
-            if blockers_text and blockers_text.strip():
+            if blockers_text.strip():
                 blockers_to_create = []
-                # Prefer detected blockers; fallback to a single generic blocker
                 detected = blocker_analysis.get('blockers') or []
                 if detected:
                     for b in detected:
@@ -1007,7 +1025,7 @@ def submit_standup():
                             'context': b.get('context') or blockers_text,
                             'severity': b.get('severity', 'medium'),
                             'status': 'active',
-                            'created_at': datetime.utcnow().isoformat()
+                            'created_at': datetime.utcnow().isoformat(),
                         })
                 else:
                     blockers_to_create.append({
@@ -1019,57 +1037,97 @@ def submit_standup():
                         'context': blockers_text,
                         'severity': 'medium',
                         'status': 'active',
-                        'created_at': datetime.utcnow().isoformat()
+                        'created_at': datetime.utcnow().isoformat(),
                     })
 
                 for blocker_doc in blockers_to_create:
                     ref = db.collection('blockers').add(blocker_doc)
-                    # Emit real-time update per blocker
-                    socketio.emit('blocker_detected', {
-                        'blocker_id': ref[1].id,
-                        'team_id': team_id,
-                        'userEmail': user_email,
-                        'keyword': blocker_doc['keyword'],
-                        'severity': blocker_doc['severity']
-                    }, room=f"team_{company_id}_{team_id}")
+                    socketio.emit(
+                        'blocker_detected',
+                        {
+                            'blocker_id': ref[1].id,
+                            'team_id': team_id,
+                            'userEmail': user_email,
+                            'keyword': blocker_doc['keyword'],
+                            'severity': blocker_doc['severity'],
+                        },
+                        room=f"team_{company_id}_{team_id}",
+                    )
         except Exception as e:
             print(f"Error creating blocker docs: {e}")
-        room = f"team_{company_id}_{team_id}"
-        socketio.emit('standup_update', {
-            'type': 'new_standup',
-            'standup': standup_data
-        }, room=room)
-        
-        # Get all today's standups for team summary
-        today_standups = db.collection('standups').where('team_id', '==', team_id)\
-                           .where('company_id', '==', company_id)\
-                           .where('date', '==', today).get()
 
-        standup_entries = []
-        for doc in today_standups:
-            entry = doc.to_dict()
-            standup_entries.append(entry)
-        
-        # Generate team summary
+        # Also support array-based blockers in payload (one doc per entry)
+        try:
+            body = request.get_json(force=True, silent=True) or {}
+            blockers_in = body.get('blockers', [])
+            if isinstance(blockers_in, str):
+                lines = [ln.strip() for ln in blockers_in.split('\n')]
+                blockers_in = [ln for ln in lines if ln]
+
+            if isinstance(blockers_in, list) and blockers_in:
+                batch = db.batch()
+                created = 0
+                for raw in blockers_in:
+                    doc = _blocker_doc(
+                        team_id=team_id,
+                        user_id=user_id,
+                        user_email=user_email,
+                        text=raw,
+                        severity='medium',
+                    )
+                    if not doc:
+                        continue
+                    ref = db.collection('blockers').document()
+                    batch.set(ref, doc)
+                    created += 1
+                if created:
+                    batch.commit()
+        except Exception as e:
+            app.logger.warning(f"Blocker creation failed but standup saved: {e}")
+
+        room = f"team_{company_id}_{team_id}"
+        socketio.emit(
+            'standup_update',
+            {
+                'type': 'new_standup',
+                'standup': standup_data,
+            },
+            room=room,
+        )
+
+        # Get all today's standups for team summary
+        today_standups = (
+            db.collection('standups')
+            .where('team_id', '==', team_id)
+            .where('company_id', '==', company_id)
+            .where('date', '==', today)
+            .get()
+        )
+
+        standup_entries = [doc.to_dict() for doc in today_standups]
         team_summary = generate_team_summary(standup_entries)
-        
-        # Emit real-time update
-        socketio.emit('standup_submitted', {
-            'user_email': user_email,
-            'team_id': team_id,
-            'sentiment': sentiment_analysis,
-            'has_blockers': blocker_analysis.get('has_blockers', False)
-        }, room=f"team_{company_id}_{team_id}")
-        
-        return jsonify({
-            'success': True,
-            'message': 'Standup submitted successfully',
-            'blocker_analysis': blocker_analysis,
-            'sentiment': sentiment_analysis,
-            'team_summary': team_summary,
-            'team_standup_count': len(standup_entries)
-        })
-        
+
+        socketio.emit(
+            'standup_submitted',
+            {
+                'user_email': user_email,
+                'team_id': team_id,
+                'sentiment': sentiment_analysis,
+                'has_blockers': blocker_analysis.get('has_blockers', False),
+            },
+            room=f"team_{company_id}_{team_id}",
+        )
+
+        return jsonify(
+            {
+                'success': True,
+                'message': 'Standup submitted successfully',
+                'blocker_analysis': blocker_analysis,
+                'sentiment': sentiment_analysis,
+                'team_summary': team_summary,
+                'team_standup_count': len(standup_entries),
+            }
+        )
     except Exception as e:
         print(f"Error submitting standup: {e}")
         traceback.print_exc()
@@ -1797,6 +1855,56 @@ def delete_task(task_id):
     except Exception as e:
         print(f"Error deleting task: {str(e)}")
         return jsonify({'success': False, 'error': 'Failed to delete task'}), 500
+
+# ===== /api/blockers endpoints (list, resolve, priority) =====
+@app.route("/api/blockers", methods=["GET"])
+@require_auth
+def api_list_blockers():
+    team_id = request.args.get("team_id")
+    status = request.args.get("status", "active")
+    severity = request.args.get("priority")  # optional: low|medium|high
+
+    if not team_id:
+        return jsonify({"error": "team_id is required"}), 400
+
+    q = db.collection("blockers").where("team_id", "==", team_id)
+    if status:
+        q = q.where("status", "==", status)
+    if severity:
+        q = q.where("severity", "==", severity)
+
+    docs = q.order_by("created_at", direction=firestore.Query.DESCENDING).limit(100).stream()
+    items = []
+    for d in docs:
+        obj = d.to_dict()
+        obj["id"] = d.id
+        items.append(obj)
+    return jsonify({"blockers": items})
+
+
+@app.route("/api/blockers/<blocker_id>/resolve", methods=["POST"])
+@require_auth
+def api_resolve_blocker(blocker_id):
+    ref = db.collection("blockers").document(blocker_id)
+    snap = ref.get()
+    if not snap.exists:
+        return jsonify({"error": "not_found"}), 404
+    ref.update({"status": "resolved", "resolved_at": _now_ts()})
+    return jsonify({"ok": True})
+
+
+@app.route("/api/blockers/<blocker_id>/priority", methods=["PUT"])
+@require_auth
+def api_update_blocker_priority(blocker_id):
+    body = request.get_json(force=True, silent=True) or {}
+    severity = (body.get("severity") or "").lower()
+    if severity not in ("low", "medium", "high"):
+        return jsonify({"error": "invalid_severity"}), 400
+    ref = db.collection("blockers").document(blocker_id)
+    if not ref.get().exists:
+        return jsonify({"error": "not_found"}), 404
+    ref.update({"severity": severity})
+    return jsonify({"ok": True})
 
 # ===== FIRST-CLASS BLOCKER ROUTES (no /api prefix) =====
 @app.route('/blockers/active', methods=['GET'])

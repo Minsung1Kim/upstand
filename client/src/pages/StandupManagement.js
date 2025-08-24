@@ -90,15 +90,21 @@ function StandupManagement() {
       const response = await api.post('/submit-standup', {
         yesterday: newStandup.yesterday,
         today: newStandup.today,
-        blockers: newStandup.blockers,
-        team_id: currentTeam.id
+        team_id: currentTeam.id,
+        blockers: Array.isArray(newStandup.blockers)
+          ? newStandup.blockers.filter((b) => b && b.trim())
+          : String(newStandup.blockers || '')
+              .split('\n')
+              .map((s) => s.trim())
+              .filter(Boolean),
+        blockers_text: newStandup.blockers,
       });
       
       console.log('Create standup response:', response.data);
       
       if (response.data.success) {
         // Reset form and close modal
-        setNewStandup({ yesterday: '', today: '', blockers: '' });
+  setNewStandup({ yesterday: '', today: '', blockers: '' });
         setShowCreateStandup(false);
         
         // Refetch standups to show the new one

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import api from '../services/api';
 import { useTeam } from '../context/TeamContext';
 import { useCompany } from '../context/CompanyContext';
 import { 
@@ -18,11 +19,15 @@ import {
 function BlockerManagement() {
   const { currentTeam } = useTeam();
   const { currentCompany } = useCompany();
+  const currentTeamId = currentTeam?.id;
   
   const [blockers, setBlockers] = useState([]);
   const [analytics, setAnalytics] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState('all'); // all, active, resolved, high, medium, low
+  const [loading, setLoading] = useState(false);
+  const [filter, setFilter] = useState('all'); // legacy filter UI
+  const [tab, setTab] = useState('active'); // 'active' | 'resolved'
+  const [priority, setPriority] = useState(''); // '' | 'low' | 'medium' | 'high'
+  const [items, setItems] = useState([]);
   const [selectedBlocker, setSelectedBlocker] = useState(null);
   const [showResolutionModal, setShowResolutionModal] = useState(false);
   const [isConnected, setIsConnected] = useState(true); // Default to connected
@@ -35,20 +40,33 @@ function BlockerManagement() {
     }
   }, [currentTeam?.id, currentCompany?.id]);
 
+  // Loader for the new API
+  const loadBlockers = async () => {
+    if (!currentTeamId) return;
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ team_id: currentTeamId, status: tab });
+      if (priority) params.set('priority', priority);
+      const { data } = await api.get(`/blockers?${params.toString()}`);
+      setItems(data.blockers || []);
+    } catch (e) {
+      console.error('Failed to load blockers', e);
+      setItems([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadBlockers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, priority, currentTeamId]);
+
   const fetchBlockers = async () => {
     try {
-      const token = await window.firebase.auth().currentUser?.getIdToken();
-      const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/blockers/active?team_id=${currentTeam.id}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'X-Company-ID': currentCompany.id
-        }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        setBlockers(data.blockers || []);
-      }
+      // keep legacy analytics cards powered by this list
+      const { data } = await api.get(`/blockers/active`, { params: { team_id: currentTeam.id } });
+      setBlockers(data.blockers || []);
     } catch (error) {
       console.error('Error fetching blockers:', error);
     }
@@ -77,23 +95,13 @@ function BlockerManagement() {
 
   const resolveBlocker = async (blockerId, resolution) => {
     try {
-      const token = await window.firebase.auth().currentUser?.getIdToken();
-      const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/blockers/${blockerId}/resolve`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-          'X-Company-ID': currentCompany.id
-        },
-        body: JSON.stringify({ resolution })
-      });
-      
-      if (response.ok) {
-        await fetchBlockers();
-        await fetchBlockerAnalytics();
-        setShowResolutionModal(false);
-        setSelectedBlocker(null);
-      }
+      await api.post(`/blockers/${blockerId}/resolve`, { resolution });
+      // Update both lists
+      setItems(items.filter((x) => x.id !== blockerId));
+      await fetchBlockers();
+      await fetchBlockerAnalytics();
+      setShowResolutionModal(false);
+      setSelectedBlocker(null);
     } catch (error) {
       console.error('Error resolving blocker:', error);
     }
@@ -122,21 +130,11 @@ function BlockerManagement() {
 
   const updateBlockerPriority = async (blockerId, newPriority) => {
     try {
-      const token = await window.firebase.auth().currentUser?.getIdToken();
-      const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/blockers/${blockerId}/priority`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-          'X-Company-ID': currentCompany.id
-        },
-        body: JSON.stringify({ priority: newPriority })
-      });
-      
-      if (response.ok) {
-        await fetchBlockers();
-        await fetchBlockerAnalytics();
-      }
+      // Use new /api/blockers endpoint for priority updates with severity payload
+      await api.put(`/blockers/${blockerId}/priority`, { severity: newPriority });
+      setItems(items.map((x) => (x.id === blockerId ? { ...x, severity: newPriority } : x)));
+      await fetchBlockers();
+      await fetchBlockerAnalytics();
     } catch (error) {
       console.error('Error updating blocker priority:', error);
     }
@@ -145,23 +143,12 @@ function BlockerManagement() {
   const analyzeWithAI = async (blocker) => {
     setAiAnalyzing(blocker.id);
     try {
-      const token = await window.firebase.auth().currentUser?.getIdToken();
-      const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/blockers/${blocker.id}/analyze`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-          'X-Company-ID': currentCompany.id
-        },
-        body: JSON.stringify({ 
-          context: blocker.context,
-          keyword: blocker.keyword 
-        })
+      await api.post(`/blockers/${blocker.id}/analyze`, {
+        context: blocker.context,
+        keyword: blocker.keyword,
       });
-      
-      if (response.ok) {
-        await fetchBlockers(); // Refresh to show AI analysis
-      }
+      await loadBlockers();
+      await fetchBlockers(); // Refresh analytics cards
     } catch (error) {
       console.error('Error analyzing blocker with AI:', error);
     } finally {
@@ -335,145 +322,80 @@ function BlockerManagement() {
              `${filter.charAt(0).toUpperCase() + filter.slice(1)} Priority Blockers`}
           </h2>
         </div>
-
-        {filteredBlockers.length === 0 ? (
-          <div className="p-12 text-center">
-            <ShieldCheckIcon className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">
-              {filter === 'active' ? 'No Active Blockers' : 'No Blockers Found'}
-            </h3>
-            <p className="text-gray-600">
-              {filter === 'active' 
-                ? 'Great! Your team has no active blockers right now.'
-                : 'Try adjusting your filters to see more results.'
-              }
-            </p>
+        {/* Tabs */}
+        <div className="p-4">
+          <div className="flex gap-2 mb-3">
+            {['active','resolved'].map((k) => (
+              <button
+                key={k}
+                onClick={() => setTab(k)}
+                className={`px-3 py-1 rounded ${tab === k ? 'bg-gray-900 text-white' : 'bg-gray-200'}`}
+              >
+                {k[0].toUpperCase() + k.slice(1)}
+              </button>
+            ))}
+            <div className="ml-auto flex items-center gap-2">
+              <span className="text-sm">Priority</span>
+              <select
+                value={priority}
+                onChange={(e) => setPriority(e.target.value)}
+                className="border rounded px-2 py-1 text-sm"
+              >
+                <option value="">All</option>
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+              </select>
+            </div>
           </div>
-        ) : (
-          <div className="divide-y divide-gray-200">
-            {filteredBlockers.map((blocker, index) => (
-              <div key={index} className="p-6 hover:bg-gray-50 transition-colors">
-                <div className="flex items-start justify-between">
+
+          {/* List */}
+          {loading ? (
+            <div className="p-4 text-sm text-gray-500">Loading blockers…</div>
+          ) : items.length === 0 ? (
+            <div className="p-8 text-center text-gray-500">No blockers found.</div>
+          ) : (
+            <ul className="divide-y border rounded">
+              {items.map((b) => (
+                <li key={b.id} className="p-3 flex items-start gap-3">
                   <div className="flex-1">
-                    <div className="flex items-center space-x-3 mb-2">
-                      <div className={`w-3 h-3 rounded-full ${
-                        blocker.severity === 'high' ? 'bg-red-500' :
-                        blocker.severity === 'medium' ? 'bg-yellow-500' : 'bg-blue-500'
-                      }`}></div>
-                      <h3 className="text-lg font-medium text-gray-900">
-                        {blocker.keyword || 'General Blocker'}
-                      </h3>
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                        blocker.status === 'active' 
-                          ? 'bg-red-100 text-red-800' 
-                          : 'bg-green-100 text-green-800'
-                      }`}>
-                        {blocker.status}
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs uppercase tracking-wide border px-2 py-0.5 rounded">
+                        {b.severity || 'medium'}
                       </span>
-                      
-                      {/* Priority Selector */}
-                      {blocker.status === 'active' && (
-                        <select
-                          value={blocker.severity}
-                          onChange={(e) => updateBlockerPriority(blocker.id, e.target.value)}
-                          className={`px-2 py-1 rounded text-xs font-medium border-0 cursor-pointer ${
-                            blocker.severity === 'high' ? 'bg-red-100 text-red-800' :
-                            blocker.severity === 'medium' ? 'bg-yellow-100 text-yellow-800' :
-                            'bg-blue-100 text-blue-800'
-                          }`}
-                        >
-                          <option value="high">High Priority</option>
-                          <option value="medium">Medium Priority</option>
-                          <option value="low">Low Priority</option>
-                        </select>
-                      )}
+                      <span className="text-xs text-gray-500">
+                        {new Date(b.created_at?._seconds ? b.created_at._seconds * 1000 : Date.now()).toLocaleString()}
+                      </span>
                     </div>
-
-                    <div className="flex items-center space-x-4 text-sm text-gray-600 mb-3">
-                      <div className="flex items-center">
-                        <UserIcon className="w-4 h-4 mr-1" />
-                        {blocker.user_name || blocker.user_email}
-                      </div>
-                      <div className="flex items-center">
-                        <ClockIcon className="w-4 h-4 mr-1" />
-                        {formatTimeAgo(blocker.created_at)}
-                      </div>
-                    </div>
-
-                    {blocker.standup_context && (
-                      <div className="bg-gray-50 rounded-lg p-3 mb-3">
-                        <p className="text-sm text-gray-600 font-medium mb-1">From standup:</p>
-                        <p className="text-sm text-gray-700">{blocker.standup_context}</p>
-                      </div>
-                    )}
-
-                    {/* AI Analysis Display */}
-                    {blocker.ai_analysis && (
-                      <div className="bg-blue-50 rounded-lg p-3 mb-3">
-                        <p className="text-sm text-blue-800 font-medium mb-1">🤖 AI Analysis:</p>
-                        <p className="text-sm text-blue-700">{blocker.ai_analysis}</p>
-                        {blocker.ai_suggestions && blocker.ai_suggestions.length > 0 && (
-                          <div className="mt-2">
-                            <p className="text-xs text-blue-600 font-medium">Suggested actions:</p>
-                            <ul className="list-disc list-inside text-xs text-blue-600 mt-1">
-                              {blocker.ai_suggestions.map((suggestion, i) => (
-                                <li key={i}>{suggestion}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {blocker.resolution && (
-                      <div className="bg-green-50 rounded-lg p-3 mb-3">
-                        <p className="text-sm text-green-800 font-medium mb-1">Resolution:</p>
-                        <p className="text-sm text-green-700">{blocker.resolution}</p>
-                        <p className="text-xs text-green-600 mt-1">
-                          Resolved {formatTimeAgo(blocker.resolved_at)} by {blocker.resolved_by}
-                        </p>
-                      </div>
-                    )}
+                    <div className="font-medium mt-1">{b.keyword}</div>
+                    {!!b.context && <div className="text-sm text-gray-600 mt-1">{b.context}</div>}
+                    <div className="text-xs text-gray-500 mt-1">{b.user_email}</div>
                   </div>
 
-                  {blocker.status === 'active' && (
-                    <div className="flex flex-col space-y-2 ml-4">
+                  {tab === 'active' && (
+                    <div className="flex flex-col gap-2">
                       <button
-                        onClick={() => {
-                          setSelectedBlocker(blocker);
-                          setShowResolutionModal(true);
-                        }}
-                        className="px-3 py-1 text-sm bg-green-100 text-green-700 rounded-md hover:bg-green-200 transition-colors"
+                        onClick={() => resolveBlocker(b.id)}
+                        className="px-3 py-1 rounded bg-green-600 text-white text-sm"
                       >
-                        ✓ Mark Resolved
+                        Resolve
                       </button>
-                      <button
-                        onClick={() => escalateBlocker(blocker.id)}
-                        className="px-3 py-1 text-sm bg-red-100 text-red-700 rounded-md hover:bg-red-200 transition-colors"
+                      <select
+                        value={b.severity || 'medium'}
+                        onChange={(e) => updateBlockerPriority(b.id, e.target.value)}
+                        className="border rounded px-2 py-1 text-sm"
                       >
-                        ⚠ Escalate
-                      </button>
-                      <button
-                        onClick={() => analyzeWithAI(blocker)}
-                        disabled={aiAnalyzing === blocker.id}
-                        className="px-3 py-1 text-sm bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
-                      >
-                        {aiAnalyzing === blocker.id ? (
-                          <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-700"></div>
-                        ) : (
-                          <>
-                            <SparklesIcon className="w-3 h-3 mr-1" />
-                            AI Analyze
-                          </>
-                        )}
-                      </button>
+                        <option value="high">High</option>
+                        <option value="medium">Medium</option>
+                        <option value="low">Low</option>
+                      </select>
                     </div>
                   )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
 
       {/* Resolution Modal */}

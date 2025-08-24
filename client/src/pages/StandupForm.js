@@ -18,12 +18,30 @@ function StandupForm() {
   const [loading, setLoading] = useState(false);
   const [response, setResponse] = useState(null);
   const [error, setError] = useState('');
+  const [blockers, setBlockers] = useState(['']); // start with one row
 
   const handleChange = (e) => {
     setFormData({
       ...formData,
       [e.target.name]: e.target.value
     });
+  };
+
+  // Helpers for dynamic blockers UI
+  const addBlockerRow = () => {
+    if (blockers.length >= 5) return; // cap at 5 to keep UX sane
+    setBlockers([...blockers, '']);
+  };
+
+  const updateBlockerRow = (i, val) => {
+    const next = [...blockers];
+    next[i] = val;
+    setBlockers(next);
+  };
+
+  const removeBlockerRow = (i) => {
+    const next = blockers.filter((_, idx) => idx !== i);
+    setBlockers(next.length ? next : ['']); // keep at least one row
   };
 
   const handleSubmit = async (e) => {
@@ -38,10 +56,14 @@ function StandupForm() {
     setError('');
     
     try {
-      const result = await api.post('/submit-standup', {
-        ...formData,
-        team_id: currentTeam.id
-      });
+      const payload = {
+        yesterday: formData.yesterday,
+        today: formData.today,
+        team_id: currentTeam.id,
+        blockers: blockers.filter((b) => b && b.trim()), // array of strings
+        blockers_text: formData.blockers, // optional: keep old textarea
+      };
+      const result = await api.post('/submit-standup', payload);
       
       setResponse(result.data);
       // Clear form after successful submission
@@ -50,6 +72,7 @@ function StandupForm() {
         today: '',
         blockers: ''
       });
+      setBlockers(['']);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to submit standup');
     } finally {
@@ -111,6 +134,42 @@ function StandupForm() {
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               placeholder="Describe any issues blocking your progress (optional)..."
             />
+
+            {/* INSERT: dynamic blockers UI */}
+            <div className="mt-4">
+              <div className="flex items-center justify-between">
+                <label className="font-medium">Add blockers (one per line)</label>
+                <button type="button" onClick={addBlockerRow} className="text-sm underline">
+                  + Add blocker
+                </button>
+              </div>
+
+              <div className="mt-2 space-y-2">
+                {blockers.map((b, i) => (
+                  <div key={i} className="flex gap-2">
+                    <input
+                      type="text"
+                      value={b}
+                      onChange={(e) => updateBlockerRow(i, e.target.value)}
+                      placeholder={`Blocker ${i + 1}`}
+                      className="w-full border rounded px-3 py-2"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeBlockerRow(i)}
+                      className="px-2 text-sm"
+                      aria-label={`Remove blocker ${i + 1}`}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-1 text-xs text-gray-500">
+                {blockers.filter((b) => b.trim()).length} blocker(s) will be submitted
+              </div>
+            </div>
           </div>
 
           {/* Error Message */}

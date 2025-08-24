@@ -52,6 +52,7 @@ function Dashboard() {
   const [dashboardData, setDashboardData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [activeBlockers, setActiveBlockers] = useState(0);
   const navigate = useNavigate();
 
 
@@ -80,6 +81,21 @@ function Dashboard() {
     
     window.addEventListener('focus', handleFocus);
     return () => window.removeEventListener('focus', handleFocus);
+  }, [currentTeam?.id]);
+
+  // Fetch guaranteed active blocker count using new API (runs when team is ready)
+  useEffect(() => {
+    const run = async () => {
+      const currentTeamId = currentTeam?.id;
+      if (!currentTeamId) return;
+      try {
+        const { data } = await api.get(`/blockers?team_id=${currentTeamId}&status=active`);
+        setActiveBlockers((data.blockers || []).length);
+      } catch (e) {
+        setActiveBlockers(0);
+      }
+    };
+    run();
   }, [currentTeam?.id]);
 
   // Refresh data when component becomes visible again
@@ -260,7 +276,9 @@ function Dashboard() {
             <div>
               <p className="text-sm font-medium text-gray-600">Active Blockers</p>
               <p className="text-2xl font-semibold text-red-600">
-                {dashboardData?.active_blockers?.length || 0}
+                {typeof activeBlockers === 'number' && activeBlockers >= 0
+                  ? activeBlockers
+                  : (dashboardData?.active_blockers?.length || 0)}
               </p>
             </div>
             <ExclamationTriangleIcon className="w-8 h-8 text-red-500" />
