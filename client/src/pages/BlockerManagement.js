@@ -134,19 +134,7 @@ function BlockerManagement() {
     }
   };
 
-  const resolveBlocker = async (blockerId, resolution) => {
-    try {
-      await api.post(`/blockers/${blockerId}/resolve`, { resolution });
-      // Optimistically update table and stats
-      setItems((prev) => prev.filter((x) => x.id !== blockerId));
-      setStats((s) => ({ ...s, active: Math.max(0, s.active - 1), resolved: s.resolved + 1 }));
-      await fetchBlockerAnalytics();
-      setShowResolutionModal(false);
-      setSelectedBlocker(null);
-    } catch (error) {
-      console.error('Error resolving blocker:', error);
-    }
-  };
+  // old resolveBlocker removed; using the helper above
 
   const escalateBlocker = async (blockerId) => {
     try {
