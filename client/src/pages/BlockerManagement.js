@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import api from '../services/api';
+import { auth } from '../firebase';
 import { useTeam } from '../context/TeamContext';
 import { useCompany } from '../context/CompanyContext';
 import { 
@@ -78,7 +79,7 @@ function BlockerManagement() {
 
   const fetchBlockerAnalytics = async () => {
     try {
-      const token = await window.firebase.auth().currentUser?.getIdToken();
+  const token = await auth?.currentUser?.getIdToken();
       const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/analytics/blocker-summary?team_id=${currentTeam.id}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -113,7 +114,7 @@ function BlockerManagement() {
 
   const escalateBlocker = async (blockerId) => {
     try {
-      const token = await window.firebase.auth().currentUser?.getIdToken();
+  const token = await auth?.currentUser?.getIdToken();
       const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/blockers/${blockerId}/escalate`, {
         method: 'POST',
         headers: {
