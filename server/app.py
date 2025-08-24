@@ -931,8 +931,8 @@ def submit_standup():
         db.collection('standups').add(standup_data)
 
         # Create a Blocker doc per non-empty entry (best-effort)
+        created_ids = []
         try:
-            created = 0
             batch = db.batch()
             for raw in blockers_in:
                 text = (raw or '').strip()
@@ -942,9 +942,10 @@ def submit_standup():
                 if doc:
                     ref = db.collection('blockers').document()
                     batch.set(ref, doc)
-                    created += 1
-            if created:
+                    created_ids.append(ref.id)
+            if created_ids:
                 batch.commit()
+                app.logger.info(f"[blockers] created={len(created_ids)} team_id={team_id} ids={created_ids}")
         except Exception as e:
             app.logger.warning(f"Blocker creation failed but standup saved: {e}")
 
@@ -1014,16 +1015,18 @@ def submit_standup():
             room=f"team_{company_id}_{team_id}",
         )
 
-        return jsonify(
-            {
-                'success': True,
-                'message': 'Standup submitted successfully',
-                'blocker_analysis': blocker_analysis,
-                'sentiment': sentiment_analysis,
-                'team_summary': team_summary,
-                'team_standup_count': len(standup_entries),
-            }
-        )
+        resp = {
+            'success': True,
+            'message': 'Standup submitted successfully',
+            'blocker_analysis': blocker_analysis,
+            'sentiment': sentiment_analysis,
+            'team_summary': team_summary,
+            'team_standup_count': len(standup_entries),
+        }
+        # Debug fields so DevTools can confirm blocker writes
+        resp['blocker_created_count'] = len(created_ids)
+        resp['blocker_ids'] = created_ids
+        return jsonify(resp), 200
     except Exception as e:
         print(f"Error submitting standup: {e}")
         traceback.print_exc()
@@ -1801,6 +1804,17 @@ def api_update_blocker_priority(blocker_id):
         return jsonify({"error": "not_found"}), 404
     ref.update({"severity": severity})
     return jsonify({"ok": True})
+
+
+@app.route("/api/blockers/count", methods=["GET"])
+@require_auth
+def blockers_count():
+    team_id = request.args.get("team_id")
+    if not team_id:
+        return jsonify({"error": "team_id is required"}), 400
+    q = db.collection("blockers").where("team_id", "==", team_id).where("status", "==", "active")
+    n = sum(1 for _ in q.stream())
+    return jsonify({"count": n})
 
 # ===== FIRST-CLASS BLOCKER ROUTES (no /api prefix) =====
 @app.route('/blockers/active', methods=['GET'])

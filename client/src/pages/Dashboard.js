@@ -83,15 +83,15 @@ function Dashboard() {
     return () => window.removeEventListener('focus', handleFocus);
   }, [currentTeam?.id]);
 
-  // Fetch guaranteed active blocker count using new API (runs when team is ready)
+  // Fetch guaranteed active blocker count using count endpoint
   useEffect(() => {
     const run = async () => {
       const currentTeamId = currentTeam?.id;
       if (!currentTeamId) return;
       try {
-        const { data } = await api.get(`/blockers?team_id=${currentTeamId}&status=active`);
-        setActiveBlockers((data.blockers || []).length);
-      } catch (e) {
+        const { data } = await api.get(`/blockers/count?team_id=${currentTeamId}`);
+        setActiveBlockers(data.count || 0);
+      } catch {
         setActiveBlockers(0);
       }
     };
