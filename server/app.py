@@ -1760,7 +1760,7 @@ def delete_task(task_id):
 @require_auth
 def api_list_blockers():
     team_id = request.args.get("team_id")
-    status = request.args.get("status", "active")
+    status = request.args.get("status")
     severity = request.args.get("priority")  # optional: low|medium|high
 
     if not team_id:
@@ -1772,7 +1772,16 @@ def api_list_blockers():
     if severity:
         q = q.where("severity", "==", severity)
 
-    docs = q.order_by("created_at", direction=firestore.Query.DESCENDING).limit(100).stream()
+    # Prefer ordering by created_at, but fall back if an index is missing or field absent
+    try:
+        docs = (
+            q.order_by("created_at", direction=firestore.Query.DESCENDING)
+             .limit(100)
+             .stream()
+        )
+    except Exception as e:
+        app.logger.warning(f"/api/blockers order_by fallback: {e}")
+        docs = q.stream()
     items = []
     for d in docs:
         obj = d.to_dict()
