@@ -16,6 +16,7 @@ import {
   XMarkIcon,
   SparklesIcon
 } from '@heroicons/react/24/outline';
+import PriorityDropdown from "../components/PriorityDropdown";
 
 function BlockerManagement() {
   const { currentTeam } = useTeam();
@@ -424,15 +425,10 @@ function BlockerManagement() {
                       </button>
                     )}
 
-                    <select
-                      className="rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+                    <PriorityDropdown
                       value={b.severity || 'medium'}
-                      onChange={(e) => updateBlockerPriority(b.id, e.target.value)}
-                    >
-                      <option value="high">High</option>
-                      <option value="medium">Medium</option>
-                      <option value="low">Low</option>
-                    </select>
+                      onChange={(lvl) => updateBlockerPriority(b.id, lvl)}
+                    />
                   </div>
                 </li>
               ))}
