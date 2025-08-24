@@ -359,11 +359,11 @@ function BlockerManagement() {
             <div className="ml-auto flex items-center gap-2">
               <span className="text-sm">Priority</span>
               <select
-                value={priority}
-                onChange={(e) => setPriority(e.target.value)}
+                value={priority || 'All'}
+                onChange={(e) => setPriority(e.target.value === 'All' ? '' : e.target.value)}
                 className="border rounded px-2 py-1 text-sm"
               >
-                <option value="">All</option>
+                <option value="All">All</option>
                 <option value="high">High</option>
                 <option value="medium">Medium</option>
                 <option value="low">Low</option>
@@ -371,48 +371,71 @@ function BlockerManagement() {
             </div>
           </div>
 
+          {/* List header */}
+          <h3 className="text-lg font-semibold mb-3">
+            {tab === 'resolved' ? 'Resolved' : 'Active'} Blockers
+          </h3>
+
+          {/* Empty state */}
+          {!loading && items.length === 0 && (
+            <div className="py-12 text-center text-gray-500">No blockers found.</div>
+          )}
+
+          {/* Loading */}
+          {loading && (
+            <div className="py-12 text-center text-gray-500">Loading…</div>
+          )}
+
           {/* List */}
-          {loading ? (
-            <div className="p-4 text-sm text-gray-500">Loading blockers…</div>
-          ) : items.length === 0 ? (
-            <div className="p-8 text-center text-gray-500">No blockers found.</div>
-          ) : (
-            <ul className="divide-y border rounded">
+          {!loading && items.length > 0 && (
+            <ul className="divide-y divide-gray-200 rounded-lg border border-gray-200 bg-white">
               {items.map((b) => (
-                <li key={b.id} className="p-3 flex items-start gap-3">
-                  <div className="flex-1">
+                <li key={b.id} className="p-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs uppercase tracking-wide border px-2 py-0.5 rounded">
+                      <span
+                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium border ${
+                          b.severity === 'high'
+                            ? 'bg-red-50 text-red-700 border-red-200'
+                            : b.severity === 'medium'
+                            ? 'bg-amber-50 text-amber-700 border-amber-200'
+                            : 'bg-gray-50 text-gray-700 border-gray-200'
+                        }`}
+                      >
                         {b.severity || 'medium'}
                       </span>
                       <span className="text-xs text-gray-500">
                         {b.created_at ? new Date(b.created_at).toLocaleString() : ''}
                       </span>
                     </div>
-                    <div className="font-medium mt-1">{b.keyword}</div>
-                    {!!b.context && <div className="text-sm text-gray-600 mt-1">{b.context}</div>}
-                    <div className="text-xs text-gray-500 mt-1">{b.user_email}</div>
+                    <div className="mt-1 text-sm text-gray-900 break-words">
+                      {b.text || b.description || b.keyword || '(no details)'}
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      {b.user_email || b.user || ''}
+                    </div>
                   </div>
 
-                  {tab === 'active' && (
-                    <div className="flex flex-col gap-2">
+                  <div className="flex items-center gap-2 shrink-0">
+                    {tab === 'active' && (
                       <button
                         onClick={() => resolveBlocker(b.id)}
-                        className="px-3 py-1 rounded bg-green-600 text-white text-sm"
+                        className="rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
                       >
                         Resolve
                       </button>
-                      <select
-                        value={b.severity || 'medium'}
-                        onChange={(e) => updateBlockerPriority(b.id, e.target.value)}
-                        className="border rounded px-2 py-1 text-sm"
-                      >
-                        <option value="high">High</option>
-                        <option value="medium">Medium</option>
-                        <option value="low">Low</option>
-                      </select>
-                    </div>
-                  )}
+                    )}
+
+                    <select
+                      className="rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+                      value={b.severity || 'medium'}
+                      onChange={(e) => updateBlockerPriority(b.id, e.target.value)}
+                    >
+                      <option value="high">High</option>
+                      <option value="medium">Medium</option>
+                      <option value="low">Low</option>
+                    </select>
+                  </div>
                 </li>
               ))}
             </ul>
