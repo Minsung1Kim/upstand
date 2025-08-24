@@ -34,15 +34,14 @@ function WebSocketManager() {
       
       // Check connection status every 5 seconds
       const statusInterval = setInterval(() => {
-        const status = webSocketService.getConnectionStatus();
-        setConnectionStatus(status.connected ? 'connected' : 'disconnected');
+        const status = webSocketService.getConnectionStatus(); // returns 'Connected' | 'Disconnected'
+        setConnectionStatus(status === 'Connected' ? 'connected' : 'disconnected');
       }, 5000);
 
       // Test ping every 30 seconds to keep connection alive
       const pingInterval = setInterval(() => {
-        if (webSocketService.isSocketConnected()) {
-          webSocketService.ping();
-        }
+        // Emits a 'ping' if connected and returns true; otherwise no-op
+        webSocketService.testConnection();
       }, 30000);
 
       return () => {
