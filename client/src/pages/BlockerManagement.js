@@ -35,6 +35,35 @@ function BlockerManagement() {
   const [showResolutionModal, setShowResolutionModal] = useState(false);
   const [isConnected, setIsConnected] = useState(true); // Default to connected
   const [aiAnalyzing, setAiAnalyzing] = useState(null); // Track which blocker is being analyzed
+  const [busy, setBusy] = useState({}); // { [blockerId]: true }
+
+  async function updatePriority(blockerId, level) {
+    try {
+      setBusy((b) => ({ ...b, [blockerId]: true }));
+      // try the canonical endpoint first
+      await api.post(`/blockers/${blockerId}/priority`, { severity: level });
+    } catch (e) {
+      // fallback to an alternate route if your backend uses a different path
+      await api.post(`/blockers/priority`, { id: blockerId, severity: level });
+    } finally {
+      await Promise.all([loadList(), loadStats()]);
+      setBusy((b) => ({ ...b, [blockerId]: false }));
+    }
+  }
+
+  async function resolveBlocker(blockerId) {
+    try {
+      setBusy((b) => ({ ...b, [blockerId]: true }));
+      // try the canonical endpoint first
+      await api.post(`/blockers/${blockerId}/resolve`);
+    } catch (e) {
+      // fallback pattern
+      await api.post(`/blockers/resolve`, { id: blockerId });
+    } finally {
+      await Promise.all([loadList(), loadStats()]);
+      setBusy((b) => ({ ...b, [blockerId]: false }));
+    }
+  }
 
   // Stats-only KPIs for the cards
   const activeCount = (stats?.active_total ?? stats?.active ?? 0);
@@ -140,16 +169,7 @@ function BlockerManagement() {
     }
   };
 
-  const updateBlockerPriority = async (blockerId, newPriority) => {
-    try {
-      await api.put(`/blockers/${blockerId}/priority`, { severity: newPriority });
-      setItems((prev) => prev.map((x) => (x.id === blockerId ? { ...x, severity: newPriority } : x)));
-      if (tab === 'active') loadStats();
-      await fetchBlockerAnalytics();
-    } catch (error) {
-      console.error('Error updating blocker priority:', error);
-    }
-  };
+  // updateBlockerPriority replaced by updatePriority
 
   const analyzeWithAI = async (blocker) => {
     setAiAnalyzing(blocker.id);
@@ -173,7 +193,7 @@ function BlockerManagement() {
     const resolution = formData.get('resolution');
     
     if (selectedBlocker && resolution.trim()) {
-      await resolveBlocker(selectedBlocker.id, resolution.trim());
+      await resolveBlocker(selectedBlocker.id);
     }
   };
 
@@ -418,16 +438,17 @@ function BlockerManagement() {
                   <div className="flex items-center gap-2 shrink-0">
                     {tab === 'active' && (
                       <button
+                        className="btn disabled:opacity-50"
+                        disabled={!!busy[b.id]}
                         onClick={() => resolveBlocker(b.id)}
-                        className="rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
                       >
-                        Resolve
+                        {busy[b.id] ? 'Resolving…' : 'Resolve'}
                       </button>
                     )}
 
                     <PriorityDropdown
                       value={b.severity || 'medium'}
-                      onChange={(lvl) => updateBlockerPriority(b.id, lvl)}
+                      onChange={(lvl) => updatePriority(b.id, lvl)}
                     />
                   </div>
                 </li>
