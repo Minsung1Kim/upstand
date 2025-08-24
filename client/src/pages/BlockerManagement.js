@@ -21,13 +21,14 @@ function BlockerManagement() {
   const { currentCompany } = useCompany();
   const currentTeamId = currentTeam?.id;
   
-  const [blockers, setBlockers] = useState([]);
   const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [filter, setFilter] = useState('all'); // legacy filter UI
   const [tab, setTab] = useState('active'); // 'active' | 'resolved'
   const [priority, setPriority] = useState(''); // '' | 'low' | 'medium' | 'high'
-  const [items, setItems] = useState([]);
+  const [items, setItems] = useState([]);            // the table you render
+  const [stats, setStats] = useState({               // header chips
+    all: 0, active: 0, resolved: 0, high: 0, medium: 0, low: 0
+  });
   const [selectedBlocker, setSelectedBlocker] = useState(null);
   const [showResolutionModal, setShowResolutionModal] = useState(false);
   const [isConnected, setIsConnected] = useState(true); // Default to connected
@@ -35,24 +36,34 @@ function BlockerManagement() {
 
   useEffect(() => {
     if (currentTeam?.id && currentCompany?.id) {
-      fetchBlockers();
+      loadStats();
       fetchBlockerAnalytics();
     }
   }, [currentTeam?.id, currentCompany?.id]);
 
-  // Loader for the new API
-  const loadBlockers = async () => {
+  // Loader for stats (chips)
+  const loadStats = async () => {
+    if (!currentTeam?.id) return;
+    try {
+      const { data } = await api.get(`/blockers/stats`, { params: { team_id: currentTeam.id } });
+      setStats(data.stats || { all:0, active:0, resolved:0, high:0, medium:0, low:0 });
+    } catch (e) {
+      console.error('stats failed', e);
+      setStats({ all:0, active:0, resolved:0, high:0, medium:0, low:0 });
+    }
+  };
+
+  // Loader for the list (table)
+  const loadList = async () => {
     if (!currentTeamId) return;
     setLoading(true);
     try {
       const params = new URLSearchParams({ team_id: currentTeamId, status: tab });
       if (priority) params.set('priority', priority);
-  const { data } = await api.get(`/blockers?${params.toString()}`);
-  const list = (data.blockers || []);
-  setItems(list);
-  setBlockers(list); // keep header counts in sync with what's displayed
+      const { data } = await api.get(`/blockers?${params.toString()}`);
+      setItems(data.blockers || []);
     } catch (e) {
-      console.error('Failed to load blockers', e);
+      console.error('list failed', e);
       setItems([]);
     } finally {
       setLoading(false);
@@ -60,21 +71,10 @@ function BlockerManagement() {
   };
 
   useEffect(() => {
-    loadBlockers();
+    loadList();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, priority, currentTeamId]);
 
-  const fetchBlockers = async () => {
-    try {
-      // fetch ALL blockers for header counts (no status filter)
-      const params = new URLSearchParams({ team_id: currentTeam.id });
-      const { data } = await api.get(`/blockers?${params.toString()}`);
-      setBlockers(data.blockers || []);
-    } catch (error) {
-      console.error('Error fetching blockers:', error);
-      setBlockers([]);
-    }
-  };
 
   const fetchBlockerAnalytics = async () => {
     try {
@@ -100,9 +100,9 @@ function BlockerManagement() {
   const resolveBlocker = async (blockerId, resolution) => {
     try {
       await api.post(`/blockers/${blockerId}/resolve`, { resolution });
-      // Update both lists
-      setItems(items.filter((x) => x.id !== blockerId));
-      await fetchBlockers();
+      // Optimistically update table and stats
+      setItems((prev) => prev.filter((x) => x.id !== blockerId));
+      setStats((s) => ({ ...s, active: Math.max(0, s.active - 1), resolved: s.resolved + 1 }));
       await fetchBlockerAnalytics();
       setShowResolutionModal(false);
       setSelectedBlocker(null);
@@ -134,10 +134,9 @@ function BlockerManagement() {
 
   const updateBlockerPriority = async (blockerId, newPriority) => {
     try {
-      // Use new /api/blockers endpoint for priority updates with severity payload
       await api.put(`/blockers/${blockerId}/priority`, { severity: newPriority });
-      setItems(items.map((x) => (x.id === blockerId ? { ...x, severity: newPriority } : x)));
-      await fetchBlockers();
+      setItems((prev) => prev.map((x) => (x.id === blockerId ? { ...x, severity: newPriority } : x)));
+      if (tab === 'active') loadStats();
       await fetchBlockerAnalytics();
     } catch (error) {
       console.error('Error updating blocker priority:', error);
@@ -151,8 +150,8 @@ function BlockerManagement() {
         context: blocker.context,
         keyword: blocker.keyword,
       });
-      await loadBlockers();
-      await fetchBlockers(); // Refresh analytics cards
+  await loadList();
+  await loadStats(); // Refresh stats for chips
     } catch (error) {
       console.error('Error analyzing blocker with AI:', error);
     } finally {
@@ -170,15 +169,8 @@ function BlockerManagement() {
     }
   };
 
-  const filteredBlockers = blockers.filter(blocker => {
-    if (filter === 'all') return true;
-    if (filter === 'active') return blocker.status === 'active';
-    if (filter === 'resolved') return blocker.status === 'resolved';
-    if (filter === 'high' || filter === 'medium' || filter === 'low') {
-      return blocker.severity === filter;
-    }
-    return true;
-  });
+  // Legacy filter UI no longer used for counts; items are fetched server-side.
+  const filteredBlockers = items;
 
   const formatTimeAgo = (timestamp) => {
     const date = new Date(timestamp);
@@ -292,26 +284,51 @@ function BlockerManagement() {
       <div className="bg-white rounded-lg shadow mb-6">
         <div className="p-4 border-b">
           <div className="flex flex-wrap gap-2">
-            {[
-              { key: 'all', label: 'All Blockers', count: blockers.length },
-              { key: 'active', label: 'Active', count: blockers.filter(b => b.status === 'active').length },
-              { key: 'high', label: 'High Priority', count: blockers.filter(b => b.severity === 'high').length },
-              { key: 'medium', label: 'Medium Priority', count: blockers.filter(b => b.severity === 'medium').length },
-              { key: 'resolved', label: 'Resolved', count: blockers.filter(b => b.status === 'resolved').length }
-            ].map(filterOption => (
-              <button
-                key={filterOption.key}
-                onClick={() => setFilter(filterOption.key)}
-                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  filter === filterOption.key
-                    ? 'text-white'
-                    : 'text-gray-600 bg-gray-100 hover:bg-gray-200'
-                }`}
-                style={filter === filterOption.key ? { backgroundColor: '#343148' } : {}}
-              >
-                {filterOption.label} ({filterOption.count})
-              </button>
-            ))}
+            <button
+              onClick={() => { setTab('active'); setPriority(''); }}
+              className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                tab === 'active' && !priority ? 'text-white' : 'text-gray-600 bg-gray-100 hover:bg-gray-200'
+              }`}
+              style={tab === 'active' && !priority ? { backgroundColor: '#343148' } : {}}
+            >
+              All Blockers ({stats.all})
+            </button>
+            <button
+              onClick={() => { setTab('active'); setPriority(''); }}
+              className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                tab === 'active' && !priority ? 'text-white' : 'text-gray-600 bg-gray-100 hover:bg-gray-200'
+              }`}
+              style={tab === 'active' && !priority ? { backgroundColor: '#343148' } : {}}
+            >
+              Active ({stats.active})
+            </button>
+            <button
+              onClick={() => { setTab('active'); setPriority('high'); }}
+              className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                tab === 'active' && priority === 'high' ? 'text-white' : 'text-gray-600 bg-gray-100 hover:bg-gray-200'
+              }`}
+              style={tab === 'active' && priority === 'high' ? { backgroundColor: '#343148' } : {}}
+            >
+              High Priority ({stats.high})
+            </button>
+            <button
+              onClick={() => { setTab('active'); setPriority('medium'); }}
+              className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                tab === 'active' && priority === 'medium' ? 'text-white' : 'text-gray-600 bg-gray-100 hover:bg-gray-200'
+              }`}
+              style={tab === 'active' && priority === 'medium' ? { backgroundColor: '#343148' } : {}}
+            >
+              Medium Priority ({stats.medium})
+            </button>
+            <button
+              onClick={() => { setTab('resolved'); setPriority(''); }}
+              className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                tab === 'resolved' ? 'text-white' : 'text-gray-600 bg-gray-100 hover:bg-gray-200'
+              }`}
+              style={tab === 'resolved' ? { backgroundColor: '#343148' } : {}}
+            >
+              Resolved ({stats.resolved})
+            </button>
           </div>
         </div>
       </div>
@@ -368,7 +385,7 @@ function BlockerManagement() {
                         {b.severity || 'medium'}
                       </span>
                       <span className="text-xs text-gray-500">
-                        {new Date(b.created_at?._seconds ? b.created_at._seconds * 1000 : Date.now()).toLocaleString()}
+                        {b.created_at ? new Date(b.created_at).toLocaleString() : ''}
                       </span>
                     </div>
                     <div className="font-medium mt-1">{b.keyword}</div>

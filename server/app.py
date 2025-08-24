@@ -1781,13 +1781,17 @@ def api_list_blockers():
         )
     except Exception as e:
         app.logger.warning(f"/api/blockers order_by fallback: {e}")
-        docs = q.stream()
-    items = []
+        docs = q.limit(100).stream()
+    out = []
     for d in docs:
         obj = d.to_dict()
         obj["id"] = d.id
-        items.append(obj)
-    return jsonify({"blockers": items})
+        # serialize Firestore timestamps to ISO for reliable rendering
+        ts = obj.get("created_at")
+        if hasattr(ts, "isoformat"):
+            obj["created_at"] = ts.isoformat()
+        out.append(obj)
+    return jsonify({"blockers": out})
 
 
 @app.route("/api/blockers/<blocker_id>/resolve", methods=["POST"])
@@ -1824,6 +1828,29 @@ def blockers_count():
     q = db.collection("blockers").where("team_id", "==", team_id).where("status", "==", "active")
     n = sum(1 for _ in q.stream())
     return jsonify({"count": n})
+
+@app.route("/api/blockers/stats", methods=["GET"])
+@require_auth
+def blockers_stats():
+    team_id = request.args.get("team_id")
+    if not team_id:
+        return jsonify({"error": "team_id is required"}), 400
+
+    q = db.collection("blockers").where("team_id", "==", team_id)
+    all_items = [{**d.to_dict(), "id": d.id} for d in q.stream()]
+
+    def c(pred):
+        return sum(1 for x in all_items if pred(x))
+
+    stats = {
+        "all": len(all_items),
+        "active": c(lambda x: x.get("status") == "active"),
+        "resolved": c(lambda x: x.get("status") == "resolved"),
+        "high": c(lambda x: x.get("severity") == "high" and x.get("status") == "active"),
+        "medium": c(lambda x: x.get("severity") == "medium" and x.get("status") == "active"),
+        "low": c(lambda x: x.get("severity") == "low" and x.get("status") == "active"),
+    }
+    return jsonify({"stats": stats})
 
 # ===== FIRST-CLASS BLOCKER ROUTES (no /api prefix) =====
 @app.route('/blockers/active', methods=['GET'])
