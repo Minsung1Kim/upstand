@@ -989,6 +989,51 @@ def submit_standup():
         
         # Save to Firestore
         db.collection('standups').add(standup_data)
+
+        # Create first-class Blocker docs when blockers text is present
+        try:
+            if blockers_text and blockers_text.strip():
+                blockers_to_create = []
+                # Prefer detected blockers; fallback to a single generic blocker
+                detected = blocker_analysis.get('blockers') or []
+                if detected:
+                    for b in detected:
+                        blockers_to_create.append({
+                            'team_id': team_id,
+                            'company_id': company_id,
+                            'user_id': user_id,
+                            'user_email': user_email,
+                            'keyword': b.get('keyword') or 'blocker',
+                            'context': b.get('context') or blockers_text,
+                            'severity': b.get('severity', 'medium'),
+                            'status': 'active',
+                            'created_at': datetime.utcnow().isoformat()
+                        })
+                else:
+                    blockers_to_create.append({
+                        'team_id': team_id,
+                        'company_id': company_id,
+                        'user_id': user_id,
+                        'user_email': user_email,
+                        'keyword': 'blocker',
+                        'context': blockers_text,
+                        'severity': 'medium',
+                        'status': 'active',
+                        'created_at': datetime.utcnow().isoformat()
+                    })
+
+                for blocker_doc in blockers_to_create:
+                    ref = db.collection('blockers').add(blocker_doc)
+                    # Emit real-time update per blocker
+                    socketio.emit('blocker_detected', {
+                        'blocker_id': ref[1].id,
+                        'team_id': team_id,
+                        'userEmail': user_email,
+                        'keyword': blocker_doc['keyword'],
+                        'severity': blocker_doc['severity']
+                    }, room=f"team_{company_id}_{team_id}")
+        except Exception as e:
+            print(f"Error creating blocker docs: {e}")
         room = f"team_{company_id}_{team_id}"
         socketio.emit('standup_update', {
             'type': 'new_standup',
@@ -1752,6 +1797,197 @@ def delete_task(task_id):
     except Exception as e:
         print(f"Error deleting task: {str(e)}")
         return jsonify({'success': False, 'error': 'Failed to delete task'}), 500
+
+# ===== FIRST-CLASS BLOCKER ROUTES (no /api prefix) =====
+@app.route('/blockers/active', methods=['GET'])
+@require_auth
+def get_active_blockers_v2():
+    """Return active blockers for a team from first-class blockers collection"""
+    try:
+        company_id = request.company_id
+        team_id = request.args.get('team_id')
+        if not team_id:
+            return jsonify({'error': 'team_id is required'}), 400
+
+        q = db.collection('blockers') \
+            .where('company_id', '==', company_id) \
+            .where('team_id', '==', team_id) \
+            .where('status', '==', 'active')
+
+        blockers = []
+        for doc in q.stream():
+            data = doc.to_dict()
+            data['id'] = doc.id
+            blockers.append(data)
+
+        # Newest first if created_at is available
+        blockers.sort(key=lambda b: b.get('created_at', ''), reverse=True)
+
+        return jsonify({'success': True, 'blockers': blockers, 'total_count': len(blockers)})
+    except Exception as e:
+        print(f"Error fetching active blockers (v2): {e}")
+        return jsonify({'success': False, 'error': 'Failed to fetch blockers'}), 500
+
+
+@app.route('/blockers/<blocker_id>/resolve', methods=['POST'])
+@require_auth
+def resolve_blocker_v2(blocker_id):
+    """Mark a blocker doc as resolved"""
+    try:
+        company_id = request.company_id
+        user_email = request.user_email
+        data = request.get_json() or {}
+        resolution = (data.get('resolution') or '').strip()
+
+        blocker_ref = db.collection('blockers').document(blocker_id)
+        blocker_doc = blocker_ref.get()
+        if not blocker_doc.exists:
+            return jsonify({'error': 'Blocker not found'}), 404
+
+        blocker = blocker_doc.to_dict()
+        if blocker.get('company_id') != company_id:
+            return jsonify({'error': 'Access denied'}), 403
+
+        update = {
+            'status': 'resolved',
+            'resolved_at': datetime.utcnow().isoformat(),
+            'resolved_by': user_email
+        }
+        if resolution:
+            update['resolution'] = resolution
+
+        blocker_ref.update(update)
+
+        # Emit real-time update
+        socketio.emit('blocker_resolved', {
+            'blocker_id': blocker_id,
+            'resolved_by': user_email,
+            'team_id': blocker.get('team_id')
+        }, room=f"team_{company_id}_{blocker.get('team_id')}")
+
+        return jsonify({'success': True, 'message': 'Blocker resolved'})
+    except Exception as e:
+        print(f"Error resolving blocker (v2): {e}")
+        return jsonify({'success': False, 'error': 'Failed to resolve blocker'}), 500
+
+
+@app.route('/blockers/<blocker_id>/priority', methods=['PUT'])
+@require_auth
+def update_blocker_priority_v2(blocker_id):
+    """Update blocker severity (priority)"""
+    try:
+        company_id = request.company_id
+        user_email = request.user_email
+        data = request.get_json() or {}
+        new_priority = data.get('priority')
+        if new_priority not in ['high', 'medium', 'low']:
+            return jsonify({'error': 'Invalid priority'}), 400
+
+        blocker_ref = db.collection('blockers').document(blocker_id)
+        blocker_doc = blocker_ref.get()
+        if not blocker_doc.exists:
+            return jsonify({'error': 'Blocker not found'}), 404
+
+        blocker = blocker_doc.to_dict()
+        if blocker.get('company_id') != company_id:
+            return jsonify({'error': 'Access denied'}), 403
+
+        blocker_ref.update({
+            'severity': new_priority,
+            'updated_at': datetime.utcnow().isoformat()
+        })
+
+        # Optional audit log
+        try:
+            db.collection('blocker_updates').add({
+                'blocker_id': blocker_id,
+                'new_priority': new_priority,
+                'updated_by': user_email,
+                'updated_at': datetime.utcnow().isoformat(),
+                'company_id': company_id
+            })
+        except Exception:
+            pass
+
+        return jsonify({'success': True, 'message': 'Priority updated'})
+    except Exception as e:
+        print(f"Error updating blocker priority (v2): {e}")
+        return jsonify({'success': False, 'error': 'Failed to update priority'}), 500
+
+
+@app.route('/blockers/<blocker_id>/analyze', methods=['POST'])
+@require_auth
+def analyze_blocker_v2(blocker_id):
+    """Analyze blocker with OpenAI and store results on blocker doc"""
+    try:
+        if not os.getenv('OPENAI_API_KEY'):
+            return jsonify({'error': 'AI analysis not available'}), 503
+
+        company_id = request.company_id
+        blocker_ref = db.collection('blockers').document(blocker_id)
+        blocker_doc = blocker_ref.get()
+        if not blocker_doc.exists:
+            return jsonify({'error': 'Blocker not found'}), 404
+
+        blocker = blocker_doc.to_dict()
+        if blocker.get('company_id') != company_id:
+            return jsonify({'error': 'Access denied'}), 403
+
+        from openai import OpenAI
+        client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+
+        prompt = f"""
+        Analyze this specific blocker and provide actionable insights:
+        Blocker: "{blocker.get('keyword', '')}"
+        Context: "{blocker.get('context', '')}"
+
+        Please provide JSON with:
+        {{
+          "analysis": "brief analysis",
+          "suggestions": ["suggestion1", "suggestion2"],
+          "severity": "medium",
+          "impact": "potential impact description"
+        }}
+        """
+
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=300,
+            temperature=0.3
+        )
+
+        ai_result = response.choices[0].message.content.strip()
+        if ai_result.startswith('```json'):
+            ai_result = ai_result[7:]
+        if ai_result.endswith('```'):
+            ai_result = ai_result[:-3]
+
+        import json as _json
+        analysis = _json.loads(ai_result)
+
+        # Store summary on blocker doc
+        blocker_ref.update({
+            'ai_analysis': analysis.get('analysis', ''),
+            'ai_suggestions': analysis.get('suggestions', []),
+            'updated_at': datetime.utcnow().isoformat()
+        })
+
+        # Optional: historical log
+        try:
+            db.collection('blocker_ai_analyses').add({
+                'blocker_id': blocker_id,
+                'analysis': analysis,
+                'analyzed_at': datetime.utcnow().isoformat(),
+                'company_id': company_id
+            })
+        except Exception:
+            pass
+
+        return jsonify({'success': True, 'analysis': analysis})
+    except Exception as e:
+        print(f"Error analyzing blocker (v2): {e}")
+        return jsonify({'success': False, 'error': 'Failed to analyze blocker'}), 500
 
 # ===== COMMENT ROUTES =====
 @app.route('/api/sprints/<sprint_id>/comments', methods=['POST'])
