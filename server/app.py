@@ -1842,13 +1842,60 @@ def blockers_stats():
     def c(pred):
         return sum(1 for x in all_items if pred(x))
 
+    # Time window: start of current month (UTC)
+    now_utc = datetime.now(timezone.utc)
+    month_start = now_utc.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    def parse_dt(val):
+        # Accept Firestore Timestamp/datetime or ISO string
+        if hasattr(val, "isoformat"):
+            dt = val
+        elif isinstance(val, str):
+            try:
+                dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
+            except Exception:
+                return None
+        else:
+            return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+
+    # Core counts
+    all_count = len(all_items)
+    active_count = c(lambda x: x.get("status") == "active")
+    resolved_total_count = c(lambda x: x.get("status") == "resolved")
+    # Priority counts (active only)
+    high_active = c(lambda x: x.get("severity") == "high" and x.get("status") == "active")
+    medium_active = c(lambda x: x.get("severity") == "medium" and x.get("status") == "active")
+    low_active = c(lambda x: x.get("severity") == "low" and x.get("status") == "active")
+    # Resolved this month
+    resolved_month_count = c(
+        lambda x: x.get("status") == "resolved" and (lambda dt: dt is not None and dt >= month_start)(parse_dt(x.get("resolved_at")))
+    )
+
+    # Optional: rate of standups with blockers; unknown here → 0
+    blocker_rate_pct = 0
+
     stats = {
-        "all": len(all_items),
-        "active": c(lambda x: x.get("status") == "active"),
-        "resolved": c(lambda x: x.get("status") == "resolved"),
-        "high": c(lambda x: x.get("severity") == "high" and x.get("status") == "active"),
-        "medium": c(lambda x: x.get("severity") == "medium" and x.get("status") == "active"),
-        "low": c(lambda x: x.get("severity") == "low" and x.get("status") == "active"),
+        # Back-compat simple keys
+        "all": all_count,
+        "active": active_count,
+        "resolved": resolved_total_count,
+        "high": high_active,
+        "medium": medium_active,
+        "low": low_active,
+        # New richer keys for cards
+        "active_total": active_count,
+        "high_total": high_active,
+        "resolved_total": resolved_total_count,
+        "resolved_month": resolved_month_count,
+        "blocker_rate": blocker_rate_pct,
+        "by_priority": {
+            "high": high_active,
+            "medium": medium_active,
+            "low": low_active,
+        },
     }
     return jsonify({"stats": stats})
 
