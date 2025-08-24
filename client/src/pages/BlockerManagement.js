@@ -47,8 +47,10 @@ function BlockerManagement() {
     try {
       const params = new URLSearchParams({ team_id: currentTeamId, status: tab });
       if (priority) params.set('priority', priority);
-      const { data } = await api.get(`/blockers?${params.toString()}`);
-      setItems(data.blockers || []);
+  const { data } = await api.get(`/blockers?${params.toString()}`);
+  const list = (data.blockers || []);
+  setItems(list);
+  setBlockers(list); // keep header counts in sync with what's displayed
     } catch (e) {
       console.error('Failed to load blockers', e);
       setItems([]);
@@ -64,11 +66,13 @@ function BlockerManagement() {
 
   const fetchBlockers = async () => {
     try {
-      // keep legacy analytics cards powered by this list
-      const { data } = await api.get(`/blockers/active`, { params: { team_id: currentTeam.id } });
+      // fetch ALL blockers for header counts (no status filter)
+      const params = new URLSearchParams({ team_id: currentTeam.id });
+      const { data } = await api.get(`/blockers?${params.toString()}`);
       setBlockers(data.blockers || []);
     } catch (error) {
       console.error('Error fetching blockers:', error);
+      setBlockers([]);
     }
   };
 
