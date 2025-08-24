@@ -39,7 +39,7 @@ function CompanySelector() {
           <p className="text-gray-600 mt-2">Select a company to continue</p>
         </div>
 
-        {userCompanies.length === 0 ? (
+  {(userCompanies?.length ?? 0) === 0 ? (
           <div className="text-center space-y-4">
             <p className="text-gray-600">You're not part of any company yet.</p>
             <div className="space-y-3">
@@ -63,7 +63,7 @@ function CompanySelector() {
           <div className="space-y-4">
             <h2 className="text-lg font-semibold" style={{color: '#343148'}}>Your Companies</h2>
             <div className="space-y-2">
-              {userCompanies.map((company) => (
+              {(userCompanies ?? []).map((company) => (
                 <button
                   key={company.id}
                   onClick={() => handleCompanySelect(company)}

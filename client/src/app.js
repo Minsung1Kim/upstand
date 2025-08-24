@@ -21,6 +21,9 @@ import PrivateRoute from './components/PrivateRoute';
 import SprintManagement from './pages/SprintManagement';
 import Analytics from './pages/Analytics';
 import BlockerManagement from './pages/BlockerManagement';
+import CompanySelector from './components/CompanySelector';
+import CreateCompany from './components/CreateCompany';
+import AdminCompanyCreator from './components/AdminCompanyCreator';
 
 // WebSocket Connection Component
 function WebSocketManager() {
@@ -88,6 +91,9 @@ function AppContent() {
         
         {/* Protected Routes - using PrivateRoute wrapper */}
         <Route element={<PrivateRoute />}>
+          <Route path="/company/select" element={<CompanySelector />} />
+          <Route path="/company/create" element={<CreateCompany />} />
+          <Route path="/company/join" element={<AdminCompanyCreator />} />
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/teams" element={<TeamSettings />} />
