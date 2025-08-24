@@ -12,8 +12,7 @@ function StandupForm() {
   const { currentTeam } = useTeam();
   const [formData, setFormData] = useState({
     yesterday: '',
-    today: '',
-    blockers: ''
+    today: ''
   });
   const [loading, setLoading] = useState(false);
   const [response, setResponse] = useState(null);
@@ -60,8 +59,7 @@ function StandupForm() {
         yesterday: formData.yesterday,
         today: formData.today,
         team_id: currentTeam.id,
-        blockers: blockers.filter((b) => b && b.trim()), // array of strings
-        blockers_text: formData.blockers, // optional: keep old textarea
+        blockers: blockers.filter((b) => b && b.trim()), // array of strings only
       };
       const result = await api.post('/submit-standup', payload);
       
@@ -69,8 +67,7 @@ function StandupForm() {
       // Clear form after successful submission
       setFormData({
         yesterday: '',
-        today: '',
-        blockers: ''
+        today: ''
       });
       setBlockers(['']);
     } catch (err) {
@@ -122,21 +119,8 @@ function StandupForm() {
 
           {/* Blockers */}
           <div>
-            <label htmlFor="blockers" className="block text-sm font-medium text-gray-700 mb-2">
-              Any blockers or impediments?
-            </label>
-            <textarea
-              id="blockers"
-              name="blockers"
-              rows={3}
-              value={formData.blockers}
-              onChange={handleChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="Describe any issues blocking your progress (optional)..."
-            />
-
-            {/* INSERT: dynamic blockers UI */}
-            <div className="mt-4">
+            {/* Dynamic blockers UI */}
+            <div>
               <div className="flex items-center justify-between">
                 <label className="font-medium">Add blockers (one per line)</label>
                 <button type="button" onClick={addBlockerRow} className="text-sm underline">

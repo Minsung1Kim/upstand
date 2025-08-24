@@ -226,102 +226,21 @@ def detect_blockers_keyword(text):
         'blocker_count': len(found)
     }
 
-def detect_blockers(text, use_ai=True):
-    """Enhanced blocker detection with both keyword matching and AI analysis"""
-    if not text:
-        return {'has_blockers': False, 'blockers': [], 'severity': 'none', 'blocker_count': 0}
-    
-    # Use the basic keyword detection (no recursion)
-    keyword_result = detect_blockers_keyword(text)
-    
-    if not use_ai or not os.getenv('OPENAI_API_KEY'):
-        return keyword_result
-    
-    try:
-        from openai import OpenAI
-        client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-        
-        prompt = f"""
-        Analyze the following standup text for blockers, impediments, and issues. 
-        
-        Text: "{text}"
-        
-        Please provide a JSON response with:
-        1. has_blockers: boolean - whether there are any blockers
-        2. blockers: array of objects with:
-           - keyword: the main blocker term
-           - severity: "high", "medium", or "low"
-           - context: brief explanation of the blocker
-           - suggestions: array of 1-2 suggested actions to resolve
-        3. overall_severity: "high", "medium", "low", or "none"
-        4. sentiment: "positive", "neutral", or "negative"
-        5. analysis: brief overall analysis of the situation
-        
-        Focus on real blockers that prevent progress, not just minor issues.
-        
-        Respond with ONLY valid JSON, no other text.
-        """
-        
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=500,
-            temperature=0.3
-        )
-        
-        ai_result = response.choices[0].message.content.strip()
-        
-        # Clean up response (remove markdown if present)
-        if ai_result.startswith('```json'):
-            ai_result = ai_result[7:]
-        if ai_result.endswith('```'):
-            ai_result = ai_result[:-3]
-        
-        import json
-        ai_analysis = json.loads(ai_result)
-        
-        # Merge keyword detection with AI analysis
-        enhanced_blockers = []
-        
-        # Add AI-detected blockers
-        for blocker in ai_analysis.get('blockers', []):
-            enhanced_blockers.append({
-                'keyword': blocker.get('keyword', ''),
-                'severity': blocker.get('severity', 'medium'),
-                'context': blocker.get('context', text[:100]),
-                'ai_suggestions': blocker.get('suggestions', []),
-                'detection_method': 'ai'
-            })
-        
-        # Add keyword-detected blockers that AI might have missed
-        for kw_blocker in keyword_result.get('blockers', []):
-            # Check if similar blocker already exists from AI
-            existing = False
-            for ai_blocker in enhanced_blockers:
-                if kw_blocker['keyword'].lower() in ai_blocker['keyword'].lower():
-                    existing = True
-                    break
-            
-            if not existing:
-                enhanced_blockers.append({
-                    **kw_blocker,
-                    'detection_method': 'keyword'
-                })
-        
-        return {
-            'has_blockers': len(enhanced_blockers) > 0,
-            'blockers': enhanced_blockers,
-            'severity': ai_analysis.get('overall_severity', keyword_result.get('severity', 'none')),
-            'blocker_count': len(enhanced_blockers),
-            'ai_analysis': ai_analysis.get('analysis', ''),
-            'sentiment': ai_analysis.get('sentiment', 'neutral'),
-            'sentiment_score': sentiment_to_score(ai_analysis.get('sentiment', 'neutral'))
-        }
-        
-    except Exception as e:
-        print(f"Error in AI blocker detection: {e}")
-        # Fall back to keyword detection
-        return keyword_result
+def detect_blockers(text_or_list):
+    """Return a flat list of detected blocker keywords from a string or a list of strings."""
+    texts = text_or_list if isinstance(text_or_list, list) else [text_or_list]
+    all_keywords = []
+    for t in texts:
+        try:
+            # Reuse the existing keyword detector and collect keyword fields
+            result = detect_blockers_keyword(t)
+            for b in result.get('blockers', []):
+                kw = (b.get('keyword') or '').strip()
+                if kw:
+                    all_keywords.append(kw)
+        except Exception as e:
+            app.logger.warning(f"detect_blockers skipped entry: {e}")
+    return all_keywords
 
 # ===== Blocker helper utilities =====
 def _now_ts():
@@ -984,10 +903,12 @@ def submit_standup():
         # Collect fields
         yesterday_text = data.get('yesterday', '') or ''
         today_text = data.get('today', '') or ''
-        blockers_text = data.get('blockers', '') or ''
-
+        blockers_in = data.get('blockers', [])
+        if isinstance(blockers_in, str):
+            blockers_in = [blockers_in]
         # Analyze text for insights
-        blocker_analysis = detect_blockers(blockers_text)
+        blocker_keywords = detect_blockers(blockers_in)
+        blocker_analysis = {"has_blockers": bool(blocker_keywords), "keywords": blocker_keywords}
         sentiment_analysis = analyze_sentiment(f"{yesterday_text} {today_text}")
 
         standup_data = {
@@ -999,7 +920,7 @@ def submit_standup():
             'date': today,
             'yesterday': yesterday_text,
             'today': today_text,
-            'blockers': blockers_text,
+            'blockers': data.get('blockers', ''),
             'blocker_analysis': blocker_analysis,
             'mood': data.get('mood', 5),
             'sentiment_analysis': sentiment_analysis,
@@ -1009,52 +930,23 @@ def submit_standup():
         # Save to Firestore
         db.collection('standups').add(standup_data)
 
-        # Create first-class Blocker docs when blockers text is present
+        # Create a Blocker doc per non-empty entry (best-effort)
         try:
-            if blockers_text.strip():
-                blockers_to_create = []
-                detected = blocker_analysis.get('blockers') or []
-                if detected:
-                    for b in detected:
-                        blockers_to_create.append({
-                            'team_id': team_id,
-                            'company_id': company_id,
-                            'user_id': user_id,
-                            'user_email': user_email,
-                            'keyword': b.get('keyword') or 'blocker',
-                            'context': b.get('context') or blockers_text,
-                            'severity': b.get('severity', 'medium'),
-                            'status': 'active',
-                            'created_at': datetime.utcnow().isoformat(),
-                        })
-                else:
-                    blockers_to_create.append({
-                        'team_id': team_id,
-                        'company_id': company_id,
-                        'user_id': user_id,
-                        'user_email': user_email,
-                        'keyword': 'blocker',
-                        'context': blockers_text,
-                        'severity': 'medium',
-                        'status': 'active',
-                        'created_at': datetime.utcnow().isoformat(),
-                    })
-
-                for blocker_doc in blockers_to_create:
-                    ref = db.collection('blockers').add(blocker_doc)
-                    socketio.emit(
-                        'blocker_detected',
-                        {
-                            'blocker_id': ref[1].id,
-                            'team_id': team_id,
-                            'userEmail': user_email,
-                            'keyword': blocker_doc['keyword'],
-                            'severity': blocker_doc['severity'],
-                        },
-                        room=f"team_{company_id}_{team_id}",
-                    )
+            created = 0
+            batch = db.batch()
+            for raw in blockers_in:
+                text = (raw or '').strip()
+                if not text:
+                    continue
+                doc = _blocker_doc(team_id=team_id, user_id=user_id, user_email=user_email, text=text, severity='medium')
+                if doc:
+                    ref = db.collection('blockers').document()
+                    batch.set(ref, doc)
+                    created += 1
+            if created:
+                batch.commit()
         except Exception as e:
-            print(f"Error creating blocker docs: {e}")
+            app.logger.warning(f"Blocker creation failed but standup saved: {e}")
 
         # Also support array-based blockers in payload (one doc per entry)
         try:
@@ -1105,7 +997,11 @@ def submit_standup():
         )
 
         standup_entries = [doc.to_dict() for doc in today_standups]
-        team_summary = generate_team_summary(standup_entries)
+        try:
+            team_summary = generate_team_summary(standup_entries)
+        except Exception as e:
+            app.logger.warning(f"AI summary skipped: {e}")
+            team_summary = None
 
         socketio.emit(
             'standup_submitted',
