@@ -124,7 +124,8 @@ function BlockerManagement() {
       });
       
       if (response.ok) {
-        await fetchBlockers();
+        await loadStats();
+        await loadList();
         await fetchBlockerAnalytics();
       }
     } catch (error) {
@@ -234,7 +235,7 @@ function BlockerManagement() {
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-500">Active Blockers</p>
                 <p className="text-2xl font-bold text-gray-900">
-                  {blockers.filter(b => b.status === 'active').length}
+                  {items.filter(b => b.status === 'active').length}
                 </p>
               </div>
             </div>
@@ -271,7 +272,7 @@ function BlockerManagement() {
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-500">Resolved</p>
                 <p className="text-2xl font-bold text-gray-900">
-                  {blockers.filter(b => b.status === 'resolved').length}
+                  {items.filter(b => b.status === 'resolved').length}
                 </p>
                 <p className="text-xs text-gray-500">this month</p>
               </div>
@@ -337,10 +338,10 @@ function BlockerManagement() {
       <div className="bg-white rounded-lg shadow">
         <div className="p-4 border-b">
           <h2 className="text-lg font-semibold text-gray-900">
-            {filter === 'all' ? 'All Blockers' : 
-             filter === 'active' ? 'Active Blockers' :
-             filter === 'resolved' ? 'Resolved Blockers' :
-             `${filter.charAt(0).toUpperCase() + filter.slice(1)} Priority Blockers`}
+            {priority === 'all' ? 'All Blockers' : 
+             priority === 'active' ? 'Active Blockers' :
+             priority === 'resolved' ? 'Resolved Blockers' :
+             `${priority.charAt(0).toUpperCase() + priority.slice(1)} Priority Blockers`}
           </h2>
         </div>
         {/* Tabs */}
