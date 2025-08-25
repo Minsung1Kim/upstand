@@ -10,7 +10,7 @@ from collections import defaultdict, Counter
 
 
 # Flask imports
-from flask import Flask, request, jsonify, make_response
+from flask import Flask, jsonify, request, send_from_directory, current_app, make_response
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit, join_room, leave_room, disconnect
 
@@ -1818,6 +1818,40 @@ def api_update_blocker_priority(blocker_id):
     ref.update({"severity": severity})
     return jsonify({"ok": True})
 
+# --- Blockers mutations ---
+@app.route('/api/blockers/<blocker_id>/priority', methods=['POST', 'OPTIONS'])
+@require_auth
+def api_update_blocker_priority_post(blocker_id):
+    data = request.get_json(silent=True) or {}
+    severity = (data.get('severity') or data.get('priority') or '').lower().strip()
+    if severity not in ('low', 'medium', 'high'):
+        return jsonify({'success': False, 'error': 'invalid_severity'}), 400
+
+    try:
+        db.collection('blockers').document(blocker_id).update({
+            'severity': severity,
+            'updated_at': firestore.SERVER_TIMESTAMP,
+        })
+        return jsonify({'success': True})
+    except Exception as e:
+        current_app.logger.exception("Failed to update blocker priority")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/blockers/<blocker_id>/resolve', methods=['POST', 'OPTIONS'])
+@require_auth
+def api_resolve_blocker_post(blocker_id):
+    try:
+        db.collection('blockers').document(blocker_id).update({
+            'status': 'resolved',
+            'resolved_at': firestore.SERVER_TIMESTAMP,
+            'updated_at': firestore.SERVER_TIMESTAMP,
+        })
+        return jsonify({'success': True})
+    except Exception as e:
+        current_app.logger.exception("Failed to resolve blocker")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 @app.route("/api/blockers/count", methods=["GET"])
 @require_auth
@@ -2691,9 +2725,9 @@ def get_active_blockers():
         print(f"Error fetching active blockers: {str(e)}")
         return jsonify({'success': False, 'error': 'Failed to fetch blockers'}), 500
 
-@app.route('/api/blockers/<blocker_id>/resolve', methods=['POST'])
+@app.route('/api/standup-blockers/<blocker_id>/resolve', methods=['POST'])
 @require_auth
-def resolve_blocker(blocker_id):
+def resolve_standup_blocker(blocker_id):
     """Mark a blocker as resolved"""
     try:
         company_id = request.company_id

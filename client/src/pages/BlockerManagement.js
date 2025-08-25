@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import api from '../services/api';
+import api, { updateBlockerPriority, resolveBlockerById } from '../services/api';
 import { auth } from '../firebase';
 import { useTeam } from '../context/TeamContext';
 import { useCompany } from '../context/CompanyContext';
@@ -35,33 +35,31 @@ function BlockerManagement() {
   const [showResolutionModal, setShowResolutionModal] = useState(false);
   const [isConnected, setIsConnected] = useState(true); // Default to connected
   const [aiAnalyzing, setAiAnalyzing] = useState(null); // Track which blocker is being analyzed
-  const [busy, setBusy] = useState({}); // { [blockerId]: true }
+  const [busyResolve, setBusyResolve] = useState({});
+  const [busyPriority, setBusyPriority] = useState({});
 
   async function updatePriority(blockerId, level) {
     try {
-      setBusy((b) => ({ ...b, [blockerId]: true }));
-      // Update severity/priority field in backend
-      await api.post(`/blockers/${blockerId}/priority`, { severity: level });
-      // refresh blockers + stats
+      setBusyPriority((b) => ({ ...b, [blockerId]: true }));
+      await updateBlockerPriority(blockerId, level);
       await Promise.all([loadList(), loadStats()]);
     } catch (e) {
-      console.error("Failed to update priority", e);
+      console.error('Failed to update priority', e);
     } finally {
-      setBusy((b) => ({ ...b, [blockerId]: false }));
+      setBusyPriority((b) => ({ ...b, [blockerId]: false }));
     }
   }
 
   async function resolveBlocker(blockerId) {
     try {
-      setBusy((b) => ({ ...b, [blockerId]: true }));
-      // try the canonical endpoint first
-      await api.post(`/blockers/${blockerId}/resolve`);
-    } catch (e) {
-      // fallback pattern
-      await api.post(`/blockers/resolve`, { id: blockerId });
-    } finally {
+      setBusyResolve((b) => ({ ...b, [blockerId]: true }));
+      await resolveBlockerById(blockerId);
+      // refresh list + stats
       await Promise.all([loadList(), loadStats()]);
-      setBusy((b) => ({ ...b, [blockerId]: false }));
+    } catch (e) {
+      console.error('Failed to resolve blocker', e);
+    } finally {
+      setBusyResolve((b) => ({ ...b, [blockerId]: false }));
     }
   }
 
@@ -427,16 +425,17 @@ function BlockerManagement() {
                     {tab === 'active' && (
                       <button
                         className="px-3 py-1 rounded-md border bg-gray-100 hover:bg-gray-200 text-sm font-medium"
-                        disabled={!!busy[b.id]}
                         onClick={() => resolveBlocker(b.id)}
+                        disabled={!!busyResolve[b.id]}
                       >
-                        {busy[b.id] ? 'Resolving…' : 'Resolved'}
+                        {busyResolve[b.id] ? 'Resolving…' : 'Resolved'}
                       </button>
                     )}
 
                     <PriorityDropdown
                       value={b.severity || 'medium'}
                       onChange={(lvl) => updatePriority(b.id, lvl)}
+                      saving={!!busyPriority[b.id]}
                     />
                   </div>
                 </li>

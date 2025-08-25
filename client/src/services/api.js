@@ -51,3 +51,9 @@ api.interceptors.response.use(
 );
 
 export default api;
+
+export const updateBlockerPriority = (id, severity) =>
+  api.post(`/blockers/${id}/priority`, { severity });
+
+export const resolveBlockerById = (id) =>
+  api.post(`/blockers/${id}/resolve`);
