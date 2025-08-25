@@ -422,13 +422,18 @@ function BlockerManagement() {
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0">
-                    {tab === 'active' && (
+                    {tab === 'resolved' ? (
+                      <span className="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-700 border">
+                        Resolved
+                      </span>
+                    ) : (
                       <button
                         className="px-3 py-1 rounded-md border bg-gray-100 hover:bg-gray-200 text-sm font-medium"
                         onClick={() => resolveBlocker(b.id)}
                         disabled={!!busyResolve[b.id]}
+                        title="Mark this blocker as resolved."
                       >
-                        {busyResolve[b.id] ? 'Resolving…' : 'Resolved'}
+                        {busyResolve[b.id] ? 'Resolving…' : 'Resolve'}
                       </button>
                     )}
 
