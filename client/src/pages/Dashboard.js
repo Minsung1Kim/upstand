@@ -6,7 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useTeam } from '../context/TeamContext';
-import api from '../services/api';
+import api, { getSprintProgress, getSprintBurndown /*, seedDemoSprint */ } from '../services/api';
 import { useNavigate } from 'react-router-dom';
 
 import {
@@ -53,6 +53,8 @@ function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [activeBlockers, setActiveBlockers] = useState(0);
+  const [sprintProgress, setSprintProgress] = useState(null);
+  const [burndown, setBurndown] = useState({ labels: [], ideal: [], actual: [] });
   const navigate = useNavigate();
 
 
@@ -61,8 +63,12 @@ function Dashboard() {
     
     if (currentTeam?.id) {
       fetchDashboardData();
+      loadSprint(currentTeam.id);
       // Refresh data every 5 minutes
-      const interval = setInterval(fetchDashboardData, 5 * 60 * 1000);
+      const interval = setInterval(() => {
+        fetchDashboardData();
+        loadSprint(currentTeam.id);
+      }, 5 * 60 * 1000);
       return () => clearInterval(interval);
     } else {
       // If no team is selected, set loading to false and show appropriate message
@@ -82,6 +88,21 @@ function Dashboard() {
     window.addEventListener('focus', handleFocus);
     return () => window.removeEventListener('focus', handleFocus);
   }, [currentTeam?.id]);
+
+  const loadSprint = async (teamId) => {
+    try {
+      // Optional: seed demo once
+      // await seedDemoSprint(teamId);
+      const [pRes, bRes] = await Promise.all([
+        getSprintProgress(teamId),
+        getSprintBurndown(teamId),
+      ]);
+      if (pRes.data?.success) setSprintProgress(pRes.data.progress);
+      if (bRes.data?.success) setBurndown(bRes.data.burndown);
+    } catch (e) {
+      console.error('Sprint load failed', e);
+    }
+  };
 
   // Fetch guaranteed active blocker count using count endpoint
   useEffect(() => {
@@ -158,34 +179,25 @@ function Dashboard() {
     }
   };
 
-  // Sprint progress chart data
-  const sprintProgressData = {
-    labels: ['Completed', 'Remaining'],
-    datasets: [{
-      data: dashboardData?.active_sprint ?
-        [
-          dashboardData.active_sprint.completed_tasks || 0,
-          (dashboardData.active_sprint.total_tasks || 0) - (dashboardData.active_sprint.completed_tasks || 0)
-        ] : [0, 1],
-      backgroundColor: ['#10B981', '#E5E7EB'],
-      borderWidth: 0
-    }]
-  };
+  // Sprint Progress tile (progress bar)
+  const sprintCompletionPct = sprintProgress && sprintProgress.total_tasks > 0
+    ? Math.round(100 * (sprintProgress.completed_tasks / sprintProgress.total_tasks))
+    : 0;
 
-  // Burndown chart data
+  // Burndown chart data from API
   const burndownData = {
-    labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
+    labels: burndown.labels?.length ? burndown.labels : [''],
     datasets: [
       {
         label: 'Ideal Burndown',
-        data: [100, 75, 50, 25, 0],
+        data: burndown.ideal?.length ? burndown.ideal : [0],
         borderColor: '#9CA3AF',
         backgroundColor: 'transparent',
         borderDash: [5, 5]
       },
       {
         label: 'Actual Burndown',
-        data: [100, 80, 45, 30, 10],
+        data: burndown.actual?.length ? burndown.actual : [0],
         borderColor: '#3B82F6',
         backgroundColor: 'transparent'
       }
@@ -316,25 +328,20 @@ function Dashboard() {
         {/* Sprint Progress */}
         <div className="bg-white rounded-lg shadow p-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Sprint Progress</h2>
-          {dashboardData?.active_sprint ? (
-            <div className="space-y-4">
-              <div className="h-48">
-                <Doughnut 
-                  data={sprintProgressData}
-                  options={{
-                    maintainAspectRatio: false,
-                    plugins: {
-                      legend: {
-                        position: 'bottom'
-                      }
-                    }
-                  }}
-                />
-              </div>
-              <div className="text-center">
-                <p className="text-sm text-gray-600">
-                  {dashboardData.active_sprint.completed_tasks || 0} of {dashboardData.active_sprint.total_tasks || 0} tasks completed
-                </p>
+          {currentTeam?.id ? (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex-1 h-3 bg-gray-200 rounded">
+                  <div
+                    className="h-3 bg-green-500 rounded"
+                    style={{ width: `${sprintCompletionPct}%` }}
+                  />
+                </div>
+                <div className="ml-3 text-sm text-gray-600">
+                  {sprintProgress
+                    ? `${sprintProgress.completed_tasks} of ${sprintProgress.total_tasks} tasks completed`
+                    : 'Loading…'}
+                </div>
               </div>
             </div>
           ) : (
@@ -346,7 +353,7 @@ function Dashboard() {
       {/* Burndown Chart */}
       <div className="bg-white rounded-lg shadow p-6">
         <h2 className="text-lg font-semibold text-gray-900 mb-4">Sprint Burndown</h2>
-        {dashboardData?.active_sprint ? (
+  {currentTeam?.id && burndown.labels?.length ? (
           <div className="h-64">
             <Line 
               data={burndownData}

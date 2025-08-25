@@ -57,3 +57,13 @@ export const updateBlockerPriority = (id, severity) =>
 
 export const resolveBlockerById = (id) =>
   api.post(`/blockers/${id}/resolve`);
+
+// Sprint APIs
+export const getSprintProgress = (teamId) =>
+  api.get(`/api/sprint/progress`, { params: { team_id: teamId } });
+
+export const getSprintBurndown = (teamId) =>
+  api.get(`/api/sprint/burndown`, { params: { team_id: teamId } });
+
+export const seedDemoSprint = (teamId) =>
+  api.post(`/api/sprint/seed-demo`, { team_id: teamId });

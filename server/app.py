@@ -74,6 +74,16 @@ socketio = SocketIO(app,
 # Initialize global database variable
 db = None
 
+# --- Sprint helpers ---
+def _date(y, m, d):
+    return datetime(y, m, d)
+
+def _date_range(start: datetime, end: datetime):
+    cur = start
+    while cur <= end:
+        yield cur
+        cur += timedelta(days=1)
+
 def get_company_id():
     company_id = request.headers.get('X-Company-ID')
     if not company_id:
@@ -1932,6 +1942,203 @@ def blockers_stats():
         },
     }
     return jsonify({"stats": stats})
+
+# --- Sprint: progress ---
+@app.route("/api/sprint/progress", methods=["GET"])
+@require_auth
+def api_sprint_progress():
+    team_id = request.args.get("team_id")
+    if not team_id:
+        return jsonify({"success": False, "error": "team_id required"}), 400
+
+    try:
+        sprint_q = (
+            db.collection("sprints")
+            .where("team_id", "==", team_id)
+            .where("status", "==", "active")
+            .limit(1)
+            .get()
+        )
+        if not sprint_q:
+            return jsonify({
+                "success": True,
+                "progress": {
+                    "total_tasks": 0,
+                    "completed_tasks": 0,
+                    "total_points": 0,
+                    "completed_points": 0,
+                },
+            })
+
+        sprint = sprint_q[0].to_dict()
+        sid = sprint.get("id") or sprint_q[0].id
+
+        tasks = (
+            db.collection("sprint_tasks")
+            .where("team_id", "==", team_id)
+            .where("sprint_id", "==", sid)
+            .get()
+        )
+        total_tasks = len(tasks)
+        completed_tasks = 0
+        total_points = 0
+        completed_points = 0
+        for t in tasks:
+            td = t.to_dict()
+            pts = int(td.get("points", 0) or 0)
+            total_points += pts
+            if td.get("status") == "done":
+                completed_tasks += 1
+                completed_points += pts
+
+        return jsonify({
+            "success": True,
+            "progress": {
+                "total_tasks": total_tasks,
+                "completed_tasks": completed_tasks,
+                "total_points": total_points,
+                "completed_points": completed_points,
+                "sprint_name": sprint.get("name"),
+            },
+        })
+    except Exception as e:
+        current_app.logger.exception("sprint progress error")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# --- Sprint: burndown ---
+@app.route("/api/sprint/burndown", methods=["GET"])
+@require_auth
+def api_sprint_burndown():
+    team_id = request.args.get("team_id")
+    if not team_id:
+        return jsonify({"success": False, "error": "team_id required"}), 400
+
+    try:
+        s_q = (
+            db.collection("sprints")
+            .where("team_id", "==", team_id)
+            .where("status", "==", "active")
+            .limit(1)
+            .get()
+        )
+        if not s_q:
+            return jsonify({"success": True, "burndown": {"labels": [], "ideal": [], "actual": []}})
+
+        s = s_q[0].to_dict()
+        sid = s.get("id") or s_q[0].id
+
+        start = datetime.fromisoformat(s["start_date"])  # e.g., "2025-08-01T00:00:00"
+        end = datetime.fromisoformat(s["end_date"])
+
+        tasks = (
+            db.collection("sprint_tasks")
+            .where("team_id", "==", team_id)
+            .where("sprint_id", "==", sid)
+            .get()
+        )
+
+        total_points = sum(int((t.to_dict().get("points") or 0)) for t in tasks)
+
+        labels = [d.strftime("%m/%d") for d in _date_range(start, end)]
+        days = len(labels) if labels else 0
+        if days <= 1 or total_points == 0:
+            ideal = [total_points] * max(days, 1)
+        else:
+            step = total_points / (days - 1)
+            ideal = [round(total_points - step * i, 2) for i in range(days)]
+
+        done_by_day = {}
+        for t in tasks:
+            td = t.to_dict()
+            if td.get("status") == "done":
+                try:
+                    c_at = datetime.fromisoformat(td.get("completed_at"))
+                except Exception:
+                    c_at = end
+                key = c_at.strftime("%Y-%m-%d")
+                done_by_day[key] = done_by_day.get(key, 0) + int(td.get("points") or 0)
+
+        cumulative_done = 0
+        actual = []
+        for d in _date_range(start, end):
+            cumulative_done += done_by_day.get(d.strftime("%Y-%m-%d"), 0)
+            remaining = max(total_points - cumulative_done, 0)
+            actual.append(remaining)
+
+        return jsonify({
+            "success": True,
+            "burndown": {
+                "labels": labels,
+                "ideal": ideal,
+                "actual": actual,
+                "total_points": total_points,
+            },
+        })
+    except Exception as e:
+        current_app.logger.exception("sprint burndown error")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# --- Sprint: optional demo seeder ---
+@app.route("/api/sprint/seed-demo", methods=["POST"])
+@require_auth
+def api_sprint_seed_demo():
+    team_id = (request.get_json(silent=True) or {}).get("team_id")
+    if not team_id:
+        return jsonify({"success": False, "error": "team_id required"}), 400
+
+    try:
+        s_q = (
+            db.collection("sprints")
+            .where("team_id", "==", team_id)
+            .where("status", "==", "active")
+            .limit(1)
+            .get()
+        )
+        if s_q:
+            return jsonify({"success": True, "skipped": True})
+
+        start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        end = start + timedelta(days=13)
+        sprint_ref = db.collection("sprints").document()
+        sprint = {
+            "id": sprint_ref.id,
+            "team_id": team_id,
+            "name": "Sprint Demo",
+            "status": "active",
+            "start_date": start.isoformat(),
+            "end_date": end.isoformat(),
+            "created_at": datetime.utcnow().isoformat(),
+        }
+        sprint_ref.set(sprint)
+
+        demo_tasks = [
+            {"title": "Landing page polish", "points": 3, "status": "done", "completed_at": (start + timedelta(days=2)).isoformat()},
+            {"title": "Auth edge cases", "points": 5, "status": "in_progress"},
+            {"title": "Blockers API wire-up", "points": 3, "status": "done", "completed_at": (start + timedelta(days=5)).isoformat()},
+            {"title": "Burndown chart", "points": 5, "status": "todo"},
+            {"title": "Sprint progress tile", "points": 2, "status": "in_progress"},
+            {"title": "Analytics tidy", "points": 3, "status": "todo"},
+        ]
+        batch = db.batch()
+        for t in demo_tasks:
+            ref = db.collection("sprint_tasks").document()
+            batch.set(
+                ref,
+                {
+                    "id": ref.id,
+                    "team_id": team_id,
+                    "sprint_id": sprint_ref.id,
+                    **t,
+                    "created_at": datetime.utcnow().isoformat(),
+                },
+            )
+        batch.commit()
+        return jsonify({"success": True})
+    except Exception as e:
+        current_app.logger.exception("sprint seed-demo error")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 # ===== FIRST-CLASS BLOCKER ROUTES (no /api prefix) =====
 @app.route('/blockers/active', methods=['GET'])
