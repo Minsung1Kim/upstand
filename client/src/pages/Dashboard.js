@@ -324,62 +324,10 @@ function Dashboard() {
             <p className="text-gray-500">No standups submitted yet today.</p>
           )}
         </div>
-
-        {/* Sprint Progress */}
-        <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Sprint Progress</h2>
-          {currentTeam?.id ? (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex-1 h-3 bg-gray-200 rounded">
-                  <div
-                    className="h-3 bg-green-500 rounded"
-                    style={{ width: `${sprintCompletionPct}%` }}
-                  />
-                </div>
-                <div className="ml-3 text-sm text-gray-600">
-                  {sprintProgress
-                    ? `${sprintProgress.completed_tasks} of ${sprintProgress.total_tasks} tasks completed`
-                    : 'Loading…'}
-                </div>
-              </div>
-            </div>
-          ) : (
-            <p className="text-gray-500">No active sprint. Create one to track progress.</p>
-          )}
-        </div>
+        {/* Sprint Progress temporarily removed */}
       </div>
 
-      {/* Burndown Chart */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Sprint Burndown</h2>
-  {currentTeam?.id && burndown.labels?.length ? (
-          <div className="h-64">
-            <Line 
-              data={burndownData}
-              options={{
-                maintainAspectRatio: false,
-                scales: {
-                  y: {
-                    beginAtZero: true,
-                    title: {
-                      display: true,
-                      text: 'Story Points'
-                    }
-                  }
-                },
-                plugins: {
-                  legend: {
-                    position: 'top'
-                  }
-                }
-              }}
-            />
-          </div>
-        ) : (
-          <p className="text-gray-500 text-center py-8">No active sprint data available</p>
-        )}
-      </div>
+  {/* Sprint Burndown temporarily removed */}
 
       {/* Active Blockers List */}
       {dashboardData?.blocker_analysis?.active_blockers && dashboardData.blocker_analysis.active_blockers.length > 0 && (
