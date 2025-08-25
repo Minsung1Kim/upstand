@@ -40,13 +40,13 @@ function BlockerManagement() {
   async function updatePriority(blockerId, level) {
     try {
       setBusy((b) => ({ ...b, [blockerId]: true }));
-      // try the canonical endpoint first
+      // Update severity/priority field in backend
       await api.post(`/blockers/${blockerId}/priority`, { severity: level });
-    } catch (e) {
-      // fallback to an alternate route if your backend uses a different path
-      await api.post(`/blockers/priority`, { id: blockerId, severity: level });
-    } finally {
+      // refresh blockers + stats
       await Promise.all([loadList(), loadStats()]);
+    } catch (e) {
+      console.error("Failed to update priority", e);
+    } finally {
       setBusy((b) => ({ ...b, [blockerId]: false }));
     }
   }
@@ -426,11 +426,11 @@ function BlockerManagement() {
                   <div className="flex items-center gap-2 shrink-0">
                     {tab === 'active' && (
                       <button
-                        className="btn disabled:opacity-50"
+                        className="px-3 py-1 rounded-md border bg-gray-100 hover:bg-gray-200 text-sm font-medium"
                         disabled={!!busy[b.id]}
                         onClick={() => resolveBlocker(b.id)}
                       >
-                        {busy[b.id] ? 'Resolving…' : 'Resolve'}
+                        {busy[b.id] ? 'Resolving…' : 'Resolved'}
                       </button>
                     )}
 
