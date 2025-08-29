@@ -325,7 +325,7 @@ function Dashboard() {
           )}
         </div>
         {/* Sprint Progress temporarily removed */}
-      </div>
+      </div> 
 
   {/* Sprint Burndown temporarily removed */}
 
